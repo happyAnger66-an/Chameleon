@@ -1,16 +1,14 @@
-"""TensorRT runtime.
+"""TensorRT 运行时 — 加载 TRT engine 并通过 TensorRegistry 执行。
 
-Loads a serialized TRT engine and executes it through a declarative
-:class:`TensorRegistry` (cf. TensorRT-Edge-LLM's ``TensorRegistry`` /
-``EngineExecutor``). Inputs are bound *positionally* -- the orchestrator passes a
-dict whose value order matches the stage's forward signature, which in turn
-matches the ONNX export input order -- so binding is robust to ONNX tensor
-renaming. Persistent device buffers are cached per shape so the action-expert
-denoise loop (same shapes every step) reuses allocations and is CUDA-graph
-capturable.
+作用：
+    实现 TensorRTEngine / TensorRTRuntime：TensorRegistry 声明式发现 I/O、
+    按位置绑定（规避 ONNX 名重命名）、持久化设备缓冲（去噪环复用）、
+    execute_async_v3、可选 CUDA Graph 捕获/重放、prefill/decode 双 profile。
 
-Requires CUDA torch tensors (uses ``data_ptr()``); the NVIDIA platforms set
-``torch_device = "cuda"``.
+架构位置：
+    运行时层 — NVIDIA 一等公民实现，设计对标 TensorRT-Edge-LLM 的
+    EngineExecutor / TensorRegistry。compile→infer 闭环已验证（cosine=1.0）。
+    上游：compile/tensorrt 产出的 engine Artifact。
 """
 
 from __future__ import annotations

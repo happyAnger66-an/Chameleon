@@ -1,11 +1,14 @@
-"""NVIDIA TensorRT compiler backend (first-class target, scaffolded).
+"""NVIDIA TensorRT 编译后端 — ONNX 图到 TRT engine 的一等公民实现。
 
-Implements the full call structure for building a TensorRT engine from an ONNX
-graph, including custom-plugin shared-library preloading (see
-``model_optimizer``'s ``_load_trt_plugin_shared_libraries``) and dual
-context/generation optimization profiles for prefill/decode separation. The
-heavy ``trt.Builder`` calls run when ``tensorrt`` is importable; otherwise a
-clear error is raised describing what an on-device build would do.
+作用：
+    实现 TensorRTCompiler：插件 .so 预加载（RTLD_GLOBAL）、ONNX 解析、
+    按 QuantMetadata 设置 FP16/INT8/FP8 flag、prefill/decode 双 optimization
+    profile、engine 序列化。tensorrt 不可用时给出清晰的 on-device 构建说明。
+
+架构位置：
+    优化/编译流水线 — compile/ 的 NVIDIA 实现，被 api.run_compile 经
+    PlatformSpec.compiler="tensorrt" 选中。下游：runtime/tensorrt 加载
+    产出的 .engine 文件。
 """
 
 from __future__ import annotations

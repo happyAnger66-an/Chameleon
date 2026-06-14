@@ -1,10 +1,13 @@
-"""PTQ methods backed by NVIDIA TensorRT Model Optimizer (modelopt).
+"""ModelOpt PTQ 量化方法 — 封装 NVIDIA TensorRT Model Optimizer。
 
-Each registered method maps a Chameleon quant name to a modelopt recipe. When
-modelopt is not installed (e.g. CPU-only dev box) the method degrades to an
-annotate-only pass: it leaves weights in full precision but still emits the
-:class:`QuantMetadata` contract, so the rest of the pipeline can be exercised.
-The recipe table mirrors ``model_optimizer``'s ``QUANT_CFG_CHOICES``.
+作用：
+    注册 int8 / int8_sq / fp8 / int4_awq / w4a8_awq / nvfp4 六种方法，
+    映射到 modelopt 配置。modelopt 不可用时降级为 metadata-only（权重
+    保持全精度但产出 QuantMetadata），保证 CPU 开发机可跑通流水线。
+
+架构位置：
+    优化/编译流水线 — quantization/methods/ 的具体实现，被
+    api.run_quantize 按 TaskConfig.quantize 步骤调用。
 """
 
 from __future__ import annotations

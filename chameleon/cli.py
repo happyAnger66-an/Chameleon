@@ -1,14 +1,13 @@
-"""Chameleon command-line interface.
+"""命令行入口 — 用户与 Chameleon 交互的主界面。
 
-Subcommands:
-    platforms        list registered deployment platforms
-    architectures    list architectures and their stages
-    info             list registered backends (compilers/runtimes/quant/kernels)
-    infer            run a single inference from a task config
-    quantize         run only the quantize action of a task config
-    compile          run only the compile action of a task config
-    workflow         run a full task config (quantize -> compile -> infer)
-    profile          measure inference latency
+作用：
+    提供 platforms / architectures / info / infer / quantize / compile /
+    workflow / profile 等子命令，解析 YAML 配置并调用 api 或 workflows。
+
+架构位置：
+    入口/编排层 — 框架最外层用户入口，不含业务逻辑，仅做参数解析与
+    分发。依赖 import chameleon 完成插件注册，再调用 api.py 或
+    workflows/runner.py 执行具体任务。
 """
 
 from __future__ import annotations

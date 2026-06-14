@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../model_optimizer"
+		}
+	],
+	"settings": {}
+}

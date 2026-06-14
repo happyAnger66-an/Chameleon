@@ -1,4 +1,12 @@
-"""Quantization method registry."""
+"""量化方法注册表 — QuantMethod 插件的发现与查询。
+
+作用：
+    维护 QUANT_METHOD_REGISTRY，提供 register_quant_method /
+    get_quant_method / list_quant_methods。
+
+架构位置：
+    优化/编译流水线 — 被 api.run_quantize 和 cli info 子命令查询。
+"""
 
 from __future__ import annotations
 

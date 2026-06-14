@@ -1,4 +1,15 @@
-"""High-level programmatic API used by the CLI and the workflow runner."""
+"""高层程序化 API — 量化 / 编译 / 推理的核心调度函数。
+
+作用：
+    提供 build_adapter、run_quantize、run_compile、run_infer 等函数，
+    将 TaskConfig 翻译为各子系统的具体调用，并维护 per-stage I/O 命名约定。
+
+架构位置：
+    入口/编排层 — 位于 CLI / WorkflowRunner 与各子系统之间，是薄编排层
+    的实际执行体。上游：config/schema（TaskConfig）、models（ModelAdapter）；
+    下游：frontend（图捕获）、compile（编译）、quantization（量化）、
+    runtime/orchestrator（推理会话）。
+"""
 
 from __future__ import annotations
 

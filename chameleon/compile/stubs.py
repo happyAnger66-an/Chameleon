@@ -1,10 +1,13 @@
-"""Scaffold compiler backends for non-NVIDIA platforms.
+"""非 NVIDIA 平台编译后端脚手架 — OpenVINO / TVM / 地平线 BPU。
 
-These declare the integration contract for each platform's native toolchain and
-raise an informative ``NotImplementedError`` until implemented. Bringing a
-platform online means replacing the body of ``compile`` with calls into the
-platform SDK -- the surrounding pipeline (frontend, quant contract, runtime
-registry) is already platform-agnostic.
+作用：
+    注册 OpenVINOCompiler、TVMCompiler、HorizonCompiler 三个 scaffold
+    后端，声明各平台的集成方案并在 compile() 时抛出 NotImplementedError。
+    周边流水线（frontend、quant 契约、runtime registry）已平台无关。
+
+架构位置：
+    优化/编译流水线 — compile/ 的占位实现，对应阶段三/四路线图
+    （Intel OpenVINO、AMD/CPU TVM、地平线 BPU BYOC）。
 """
 
 from __future__ import annotations

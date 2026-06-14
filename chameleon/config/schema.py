@@ -1,8 +1,14 @@
-"""Unified task configuration (pydantic + YAML).
+"""统一任务配置 — pydantic + YAML 驱动的 quantize / compile / infer 描述。
 
-A single :class:`TaskConfig` describes a quantize -> compile -> infer task,
-replacing ``model_optimizer``'s mix of ``.py`` / JSON / argparse configs. It is
-loaded from YAML and validated up-front.
+作用：
+    定义 TaskConfig 及子模型（QuantizeStep、CompileStep、InferConfig），
+    描述 architecture / platform / actions / stage_runtimes / model_overrides
+    等。TaskConfig.load() 从 YAML 加载并校验。
+
+架构位置：
+    入口/编排层 — 全框架配置的单一来源，被 cli.py、api.py、
+    workflows/runner.py、profile/latency.py 消费。configs/*.yaml 为本
+    schema 的实例。
 """
 
 from __future__ import annotations

@@ -1,9 +1,13 @@
-"""Build artifacts and a lightweight manifest for provenance tracking.
+"""构建产物与血缘追踪 — 流水线各阶段的统一数据契约。
 
-Every pipeline step (quantize -> compile -> infer) produces an :class:`Artifact`.
-A :class:`Manifest` records the chain of artifacts so that a later step can
-consume the output of an earlier one, mirroring ``model_optimizer``'s
-``artifact_manifest.json`` but unified across platforms.
+作用：
+    定义 Artifact（量化模块、ONNX 图、engine 等）和 Manifest
+    （chameleon_manifest.json），记录 quantize → compile → infer 全链路的
+    产物血缘，供后续步骤消费前序输出。
+
+架构位置：
+    核心抽象层 — 贯穿优化/编译流水线与运行时层。frontend 产出 ONNX
+    Artifact，compile 产出 engine Artifact，workflows 写入 Manifest。
 """
 
 from __future__ import annotations

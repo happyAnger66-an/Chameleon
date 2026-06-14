@@ -1,4 +1,13 @@
-"""Inference runtimes and VLA orchestration."""
+"""推理运行时包 — 导出 Engine / RuntimeBackend 抽象与 VLA 编排。
+
+作用：
+    re-export 运行时接口，import 时注册 PyTorch / TensorRT 运行时及
+    Pi05Orchestrator。
+
+架构位置：
+    运行时层 — 加载 compile 产出的 engine 或 reference nn.Module，
+    经 VLAOrchestrator 驱动链式执行与去噪环。
+"""
 
 from chameleon.runtime.base import (
     RUNTIME_REGISTRY,

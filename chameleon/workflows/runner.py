@@ -1,8 +1,13 @@
-"""Workflow runner: executes a TaskConfig's actions in order.
+"""工作流运行器 — 按 TaskConfig.actions 顺序执行 quantize / compile / infer。
 
-Thin orchestration over the high-level API (mirrors ``model_optimizer``'s
-``WorkflowRunner`` which translates a manifest into existing commands rather than
-re-implementing logic). Records every artifact in a :class:`Manifest`.
+作用：
+    WorkflowRunner 薄编排 api.py 中的 run_quantize / run_compile / run_infer，
+    维护 Manifest 血缘记录。支持 dry_run 打印计划；infer.use_compiled_engines
+    时将 compile 产出的 engine 注入 InferenceSession。
+
+架构位置：
+    入口/编排层 — 被 cli workflow / quantize / compile 子命令调用。
+    设计对标 model_optimizer WorkflowRunner（复用 API 而非重复逻辑）。
 """
 
 from __future__ import annotations

@@ -1,9 +1,13 @@
-"""Generic registry used across Chameleon subsystems.
+"""泛型注册表 — 全框架插件发现机制的基础设施。
 
-All Chameleon plugins (platforms, architectures, models, quantization methods,
-compiler backends, runtime backends, kernels) are discovered through a small
-set of typed registries. Registration happens as an import-time side effect so
-that ``import chameleon`` wires everything up (see :mod:`chameleon.__init__`).
+作用：
+    提供 typed Registry[K, V]，支持 register / get / keys 等操作。
+    所有子系统的插件（平台、架构、模型、量化方法、编译/运行时后端、
+    自定义算子）均通过 import-time 副作用注册到此机制。
+
+架构位置：
+    基础设施层 — 被 core/platform、architectures、models、quantization、
+    compile、runtime、kernels 等各包的 registry 模块复用。
 """
 
 from __future__ import annotations

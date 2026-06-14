@@ -1,14 +1,14 @@
-"""Cross-platform custom operator framework.
+"""跨平台自定义算子框架 — 逻辑算子与平台 Kernel 的三段式模式。
 
-A logical operator (:class:`OpSpec`, e.g. ``fmha_d256``) can have one
-:class:`KernelImpl` per platform. Each implementation follows the three-stage
-pattern used by both ``model_optimizer`` and TensorRT-Edge-LLM:
+作用：
+    定义 OpSpec（逻辑算子描述）和 KernelImpl ABC，实现三段式扩展：
+    1) frontend_stub — torch.library custom op（追踪/导出）
+    2) graph_node — ONNX symbolic / 图节点
+    3) backend_artifact — 平台 plugin .so / kernel lib
 
-1. ``frontend_stub``  - a ``torch.library`` custom op so the model traces/exports.
-2. ``graph_node``     - how the op appears in the neutral graph (ONNX symbolic).
-3. ``backend_artifact`` - the platform kernel/plugin that actually executes it
-   (e.g. a TRT plugin ``.so``, a CuTe DSL artifact tagged per ``kernel_tag``,
-   or a pure-PyTorch reference for CPU).
+架构位置：
+    算子层 — 设计对标 model_optimizer 与 TensorRT-Edge-LLM custom op
+    三段式。KERNEL_REGISTRY 键为 (op, vendor)，被 frontend 和 compile 引用。
 """
 
 from __future__ import annotations

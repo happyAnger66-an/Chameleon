@@ -1,12 +1,14 @@
-"""pi05 model adapter.
+"""pi05 模型适配器 — 将 openpi / 参考模型映射为 Chameleon stage 接口。
 
-Exposes the pi05 stages through :class:`~chameleon.models.base.ModelAdapter`.
-Two backing implementations share the same stage interface:
+作用：
+    实现 Pi05Adapter：支持 reference 路径（无需权重）和真实 openpi 路径
+    （checkpoint 加载 .pt/.pth/.safetensors）。通过 _STAGE_ATTR /
+    _OPENPI_STAGE_ATTR 将 vit / llm_prefix / action_expert 映射到具体
+    nn.Module 子模块。
 
-* ``use_reference=True`` (default): the lightweight :mod:`reference` model, so the
-  pipeline runs without external weights.
-* ``use_reference=False`` with a ``checkpoint``: best-effort wrapping of openpi's
-  ``PI0Pytorch`` (requires the openpi runtime + transformers_replace install).
+架构位置：
+    模型/架构层 — 被 api.build_adapter 实例化。下游：frontend 按 stage
+    导出 ONNX，quantization 按 stage 量化，orchestrator 按 stage 推理。
 """
 
 from __future__ import annotations

@@ -1,9 +1,13 @@
-"""Unified frontend: PyTorch stage module -> platform-neutral graph.
+"""图捕获抽象 — PyTorch nn.Module stage 到平台中性图的统一接口。
 
-The frontend is the single contract between model definitions and every compile
-backend. A :class:`GraphCapture` lowers an ``nn.Module`` stage into a neutral
-graph artifact (ONNX by default; ``torch.export`` FX is reserved for backends
-that prefer it). Compiler backends then consume the resulting :class:`Artifact`.
+作用：
+    定义 GraphCapture ABC 及 GRAPH_CAPTURE_REGISTRY。capture() 将 stage
+    模块 lower 为 Artifact（默认 ONNX；预留 torch.export FX）。
+
+架构位置：
+    优化/编译流水线 — 被 api.run_compile 调用，产出 ONNX Artifact 供
+    compile/base.CompilerBackend 消费。自定义算子通过 kernels 在前端
+    注册 stub 以参与追踪。
 """
 
 from __future__ import annotations

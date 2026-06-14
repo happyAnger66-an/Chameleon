@@ -1,13 +1,13 @@
-"""Lightweight reference implementation of the pi05 stages.
+"""pi05 轻量参考模型 — 无外部权重依赖的三阶段实现。
 
-This module faithfully reproduces the *structure and algorithm* of openpi's
-``pi0_pytorch.py`` (three stages + flow-matching denoise loop, sinusoidal time
-embedding) using small, randomly-initialized layers. It lets the full Chameleon
-pipeline -- orchestrator, KV handoff, denoise loop, stage-level backend mixing --
-run end-to-end without the heavy openpi/transformers checkpoint dependencies.
+作用：
+    用小型随机初始化层复现 openpi pi0_pytorch.py 的结构与算法（三 stage +
+    flow-matching 去噪环 + 正弦时间嵌入），使全链路可在 CPU 上端到端运行。
+    定义 Pi05Config 及 Pi05ViT / Pi05Prefix / Pi05ActionExpert。
 
-The real weights are wired in via ``Pi05Adapter`` when a checkpoint and the
-openpi runtime are available; both paths expose the identical stage interface.
+架构位置：
+    模型/架构层 — 被 Pi05Adapter（use_reference=True）和 Pi05Orchestrator
+    （时间嵌入工具函数）使用。与真实 openpi 权重路径共享相同 stage 接口。
 """
 
 from __future__ import annotations

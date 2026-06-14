@@ -1,7 +1,11 @@
-"""Evaluation utilities.
+"""评估工具包 — 对比不同推理路径的精度差异。
 
-Compares actions produced by two configurations (e.g. PyTorch reference vs a
-quantized/compiled path) for accuracy regression checks.
+作用：
+    re-export compare_actions / ActionDiff。
+
+架构位置：
+    工具层（入口/编排层旁路）— 用于 TRT vs PyTorch 等路径的回归校验，
+    不参与主推理流水线。
 """
 
 from chameleon.evaluate.compare import ActionDiff, compare_actions

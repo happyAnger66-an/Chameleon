@@ -1,12 +1,14 @@
-"""Model adapter abstraction.
+"""ModelAdapter 抽象 — 外部模型到 Chameleon stage 世界的桥梁。
 
-A :class:`ModelAdapter` bridges an external model implementation (e.g. openpi's
-``PI0Pytorch``) into Chameleon's stage-based world. It is responsible for:
+作用：
+    定义 ModelAdapter 接口：build() 构建模型、stage_module() 暴露各 stage
+    的 nn.Module、example_observation() 提供追踪/冒烟测试输入。维护
+    MODEL_REGISTRY 供按名称查找适配器。
 
-* constructing / loading the model,
-* exposing each architecture stage as an ``nn.Module`` (for tracing, quantization
-  and the PyTorch reference runtime),
-* providing example inputs (observations) for tracing and smoke tests.
+架构位置：
+    模型/架构层 — 被 api.py、workflows、runtime/orchestrator 使用。
+    上游对接 architectures（architecture 字段），下游对接 frontend /
+    quantization / runtime 各 stage 模块。
 """
 
 from __future__ import annotations

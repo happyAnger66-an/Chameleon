@@ -1,12 +1,15 @@
-"""Platform abstraction.
+"""平台抽象 — 部署目标的统一能力描述。
 
-A :class:`PlatformSpec` is the cross-cutting description of a deployment target
-(vendor, device, supported dtypes, default toolchain, kernel artifact tag). The
-quantization, compile and runtime subsystems all query the platform to decide
-how to lower a model. This is the central abstraction that the previous
-``model_optimizer`` implementation lacked (it was hard-wired to NVIDIA).
+作用：
+    定义 PlatformSpec（vendor / device / dtypes / compiler / runtime /
+    kernel_tag），并注册 7 个内置平台（Orin、Thor、Intel CPU/GPU、
+    AMD GPU、地平线 BPU、通用 CPU）。量化、编译、运行时均查询平台
+    决定如何 lower 模型。
 
-The design mirrors TVM's ``Target`` and MLC-LLM's ``auto_target`` presets.
+架构位置：
+    平台抽象层（最底层横切关注点）— 贯穿 quantization / compile / runtime
+    三层。设计对标 TVM Target 与 MLC-LLM auto_target preset；补全了
+    model_optimizer 缺失的平台维度。
 """
 
 from __future__ import annotations

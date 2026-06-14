@@ -1,9 +1,13 @@
-"""Compiler backend abstraction (the core pluggable layer).
+"""编译后端抽象 — 平台中性图到可部署 engine 的核心可插拔层。
 
-Each platform plugs in a :class:`CompilerBackend` that turns a neutral graph
-:class:`Artifact` (plus an optional :class:`QuantMetadata` contract) into a
-deployable engine :class:`Artifact`. All toolchain-specific differences --
-TensorRT vs OpenVINO vs TVM vs Horizon BPU SDK -- are confined to this layer.
+作用：
+    定义 CompilerBackend ABC：compile(graph, quant_meta, ctx) → engine
+    Artifact。COMPILER_REGISTRY 键匹配 PlatformSpec.compiler。
+
+架构位置：
+    优化/编译流水线 — 被 api.run_compile 调用。上游：frontend 的 ONNX
+    Artifact + quantization 的 QuantMetadata；下游：runtime 加载 engine。
+    TensorRT / OpenVINO / TVM / Horizon 差异均隔离在此层。
 """
 
 from __future__ import annotations

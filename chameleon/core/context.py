@@ -1,4 +1,14 @@
-"""Execution contexts threaded through the compile and runtime pipelines."""
+"""执行上下文 — 编译与运行时流水线的共享状态载体。
+
+作用：
+    定义 CompileContext（平台、输出目录、架构、进度回调）和
+    RunContext（平台、架构、运行时选项如 num_steps / torch_device /
+    cuda_graph），在各 Backend 调用间传递配置。
+
+架构位置：
+    核心抽象层 — 被 compile/base、runtime/base、api.py、
+    workflows/runner.py 使用，连接平台抽象与各 Backend 实现。
+"""
 
 from __future__ import annotations
 

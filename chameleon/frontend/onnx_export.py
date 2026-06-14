@@ -1,4 +1,14 @@
-"""ONNX graph capture using ``torch.onnx.export``."""
+"""ONNX 图捕获 — 基于 torch.onnx.export 的前端实现。
+
+作用：
+    实现 OnnxExport GraphCapture：支持 dynamo 导出失败时回退 legacy
+    TorchScript 导出器；对 modelopt 量化模块自动进入 export_torch_mode
+    以生成 QDQ 节点。
+
+架构位置：
+    优化/编译流水线 — frontend 层的默认实现，注册为 "onnx" 键。
+    上游：models 的 stage nn.Module；下游：compile/tensorrt 等编译后端。
+"""
 
 from __future__ import annotations
 

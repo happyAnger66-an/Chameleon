@@ -1,10 +1,14 @@
-"""Runtime backend abstraction.
+"""运行时后端抽象 — 统一 Engine.run 接口的可插拔执行层。
 
-A :class:`RuntimeBackend` loads a (compiled or reference) stage :class:`Artifact`
-into an :class:`Engine`. Every engine exposes the same ``run(inputs) -> outputs``
-contract regardless of platform -- unifying ``model_optimizer``'s inconsistent
-TRT/Native/ORT executor APIs. Per-stage backend selection (e.g. ``vit`` on
-TensorRT, ``action_expert`` on PyTorch) is driven by the orchestrator.
+作用：
+    定义 Engine ABC（run(inputs) → outputs）和 RuntimeBackend ABC
+    （load(artifact, ctx) → Engine）。RUNTIME_REGISTRY 键匹配
+    PlatformSpec.runtime 或 TaskConfig.stage_runtimes 覆盖。
+
+架构位置：
+    运行时层 — 统一 model_optimizer 原先不一致的 TRT/Native/ORT API。
+    被 orchestrator 按 stage 加载，支持 stage 级后端混用（如 vit=TRT,
+    action_expert=PyTorch）。
 """
 
 from __future__ import annotations

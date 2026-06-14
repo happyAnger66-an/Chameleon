@@ -1,11 +1,14 @@
-"""VLA orchestration.
+"""VLA 编排器 — 架构特定的链式执行与去噪环控制流。
 
-An :class:`Orchestrator` drives the architecture-specific control flow over a set
-of per-stage :class:`Engine`s. For pi05 this means: encode images (``vit``), build
-the prefix KV memory (``llm_prefix``, once), then run the flow-matching denoise
-loop (``action_expert``, ``num_steps`` times) reusing the prefix memory -- the KV
-handoff and the latency hot path. Because stages talk through :class:`Engine`s,
-each can run on a different runtime backend (stage-level backend mixing).
+作用：
+    定义 Orchestrator ABC 和 Pi05Orchestrator（vit → llm_prefix →
+    action_expert 去噪环），以及 InferenceSession（按 stage 加载 Engine、
+    构建编排器、执行 infer）。ORCHESTRATOR_REGISTRY 按 architecture 键注册。
+
+架构位置：
+    运行时层 — 框架控制流核心。上游：architectures（stage 顺序）、
+    models（adapter 元数据）；下游：各 stage 的 Engine.run。KV handoff
+    与去噪热点均在此层实现。
 """
 
 from __future__ import annotations

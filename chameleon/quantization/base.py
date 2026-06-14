@@ -1,10 +1,13 @@
-"""Quantization abstractions.
+"""量化抽象 — QuantMethod / QuantMetadata 契约与配置。
 
-The quantization subsystem mirrors the registry pattern used by vLLM/sglang
-(``get_quant_method`` per layer) and the metadata-contract idea from
-TensorRT-Edge-LLM: a :class:`QuantMethod` produces both a quantized module and a
-:class:`QuantMetadata` describing per-component numeric formats. Compiler
-backends consume that contract to select kernels / build flags.
+作用：
+    定义 QuantConfig（用户量化请求）、QuantMetadata（各组件数值格式契约，
+    如 weight/activation/kv_cache dtype）和 QuantMethod ABC。编译与运行时
+    据此 dispatch，避免字符串硬编码。
+
+架构位置：
+    优化/编译流水线 — 设计对标 vLLM get_quant_method 与 TensorRT-Edge-LLM
+    metadata 契约。被 api.run_quantize 和 compile/base 消费。
 """
 
 from __future__ import annotations

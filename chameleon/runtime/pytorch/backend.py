@@ -1,10 +1,14 @@
-"""PyTorch reference runtime.
+"""PyTorch 参考运行时 — 直接在 PyTorch 中执行 stage 模块。
 
-This is the functional MVP backend: it runs the (reference or real) pi05 stage
-modules directly in PyTorch, validating the entire pipeline -- orchestration, KV
-handoff, the flow-matching denoise loop and stage-level backend mixing -- without
-any compiled engine. A reference :class:`Artifact` carries the ``nn.Module`` in
-its ``payload``.
+作用：
+    实现 PyTorchEngine（将 nn.Module 包装为统一 run 接口，按 dict 值顺序
+    positional 传参）和 PyTorchRuntime（从 reference Artifact.payload
+    加载模块）。无需编译 engine 即可验证全链路。
+
+架构位置：
+    运行时层 — MVP 功能后端，被 InferenceSession 在 reference 路径或
+    stage_runtimes["*"]="pytorch" 时使用。验证编排、KV handoff、去噪环
+    与 stage 级后端混用。
 """
 
 from __future__ import annotations

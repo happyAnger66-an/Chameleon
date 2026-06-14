@@ -1,4 +1,13 @@
-"""Architecture registry."""
+"""架构注册表 — ArchitectureSpec 的插件发现与查询。
+
+作用：
+    维护 ARCHITECTURE_REGISTRY，提供 register_architecture /
+    get_architecture / list_architectures 接口。
+
+架构位置：
+    模型/架构层 — 被 config、cli、runtime/orchestrator 查询架构元数据
+    （stage 列表、orchestrator 键）。
+"""
 
 from __future__ import annotations
 

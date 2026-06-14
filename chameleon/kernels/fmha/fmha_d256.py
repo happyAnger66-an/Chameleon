@@ -1,19 +1,15 @@
-"""Custom op: fused multi-head attention with head_dim=256.
+"""fmha_d256 融合多头注意力 — head_dim=256 的自定义算子示例。
 
-pi05's PaliGemma uses head_dim=256, which is past the fast path of many stock
-attention kernels -- hence ``model_optimizer`` ships a dedicated ``fmha_d256``
-CuTe DSL plugin. This shows the cross-platform shape: one :class:`OpSpec` with
-per-vendor :class:`KernelImpl`s, wired through the three-stage pattern.
+作用：
+    实现 pi05 PaliGemma head_dim=256 专用 FMHA 的三段式：
+    Stage 1: torch.ops.chameleon.fmha_d256 custom op（eager=SDPA 参考）
+    Stage 2: ONNX symbolic → trt::FmhaD256AttentionPlugin 节点
+    Stage 3: 按 PlatformSpec.kernel_tag（sm_87/sm_101）选择 CuTe DSL plugin .so
 
-Stage 1 (frontend stub): a real ``torch.library`` custom op so models trace and
-export. Its eager implementation is the SDPA reference, so PyTorch runs work.
-
-Stage 2 (graph node): an ONNX symbolic emitting a ``trt::FmhaD256AttentionPlugin``
-node, registered so ``torch.onnx.export`` produces a plugin node for TRT.
-
-Stage 3 (backend artifact): the CuTe DSL / TRT plugin ``.so`` selected by the
-platform ``kernel_tag`` (e.g. ``sm_87`` / ``sm_101``); preloaded by the TensorRT
-compiler before parsing.
+架构位置：
+    算子层 — kernels/ 的参考实现，演示 OpSpec + 多平台 KernelImpl 模式。
+    被 compile/tensorrt 在 build 前预加载 plugin，被 frontend 在导出时
+    生成 plugin 节点。
 """
 
 from __future__ import annotations

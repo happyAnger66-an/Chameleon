@@ -1,4 +1,13 @@
-"""Minimal latency profiler for an inference session."""
+"""推理延迟 profiler — 对 InferenceSession 做 warmup + 多次计时。
+
+作用：
+    profile_infer() 构建 session 后执行 warmup 和 runs 次 infer，
+    返回 mean / p50 / p90 延迟（毫秒）。
+
+架构位置：
+    工具层 — 被 cli profile 子命令调用，基于 runtime/orchestrator
+    InferenceSession 测量端到端延迟。
+"""
 
 from __future__ import annotations
 
