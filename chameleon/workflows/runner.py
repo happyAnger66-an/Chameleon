@@ -51,13 +51,20 @@ class WorkflowRunner:
             return self.manifest
 
         adapter = build_adapter(self.task)
+        compiled_engines: dict[str, Artifact] = {}
         for action in self.task.actions:
             if action == "quantize":
                 run_quantize(self.task, adapter, self.manifest)
             elif action == "compile":
-                run_compile(self.task, adapter, self.manifest)
+                compiled_engines = run_compile(self.task, adapter, self.manifest)
             elif action == "infer":
-                actions_out = run_infer(self.task)
+                stage_artifacts, stage_runtimes = self._infer_engine_bindings(compiled_engines)
+                actions_out = run_infer(
+                    self.task,
+                    stage_artifacts=stage_artifacts,
+                    stage_runtimes=stage_runtimes,
+                )
+                used = sorted(stage_artifacts) if stage_artifacts else []
                 self.manifest.add(
                     Artifact(
                         kind="inference",
@@ -65,10 +72,32 @@ class WorkflowRunner:
                         metadata={
                             "action_shape": list(actions_out.shape),
                             "action_mean": float(torch.as_tensor(actions_out).float().mean()),
+                            "engines_used": used,
                         },
                     )
                 )
+                if used:
+                    logger.info("Inference consumed compiled engines for stages: %s", used)
             else:
                 raise ValueError(f"Unknown action {action!r}.")
         self.manifest.save()
         return self.manifest
+
+    def _infer_engine_bindings(
+        self, compiled_engines: dict[str, Artifact]
+    ) -> tuple[dict[str, Artifact] | None, dict[str, str] | None]:
+        """Decide which stages infer should run on compiled engines.
+
+        Only when ``infer.use_compiled_engines`` is set and an engine was built
+        for a stage; those stages use the platform runtime (e.g. tensorrt), the
+        rest fall back to the task's configured stage runtimes.
+        """
+        if not self.task.infer.use_compiled_engines or not compiled_engines:
+            return None, None
+        from chameleon.core.platform import get_platform
+
+        runtime_name = get_platform(self.task.platform).runtime
+        stage_runtimes = dict(self.task.stage_runtimes)
+        for stage in compiled_engines:
+            stage_runtimes[stage] = runtime_name
+        return compiled_engines, stage_runtimes

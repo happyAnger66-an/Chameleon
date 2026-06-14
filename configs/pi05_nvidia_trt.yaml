@@ -1,0 +1,28 @@
+# pi05 on NVIDIA with the compile -> infer loop closed: each stage is compiled to
+# a TensorRT engine and inference runs ON those engines via the TensorRT runtime
+# (not the PyTorch reference path). Requires an NVIDIA box with TensorRT + CUDA.
+
+architecture: pi05
+model: pi05
+platform: nvidia_orin
+output_dir: output/pi05_nvidia_trt
+
+actions:
+  - compile
+  - infer
+
+model_overrides:
+  action_dim: 32
+  action_horizon: 50
+  num_denoise_steps: 10
+
+compile:
+  - stage: vit
+  - stage: llm_prefix
+  - stage: action_expert
+
+infer:
+  batch_size: 1
+  num_steps: 10
+  use_compiled_engines: true   # consume the engines built above
+  cuda_graph: false            # set true to capture/replay a CUDA graph per engine

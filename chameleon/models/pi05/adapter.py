@@ -22,11 +22,30 @@ from chameleon.models.pi05.reference import Pi05Config, Pi05ReferenceModel
 
 logger = logging.getLogger(__name__)
 
+# Reference model: attributes match the stage names directly.
 _STAGE_ATTR = {
     "vit": "vit",
     "llm_prefix": "llm_prefix",
     "action_expert": "action_expert",
 }
+
+# Real openpi PI0Pytorch: map each Chameleon stage to a real submodule. These
+# submodules are independently quantizable / exportable. NOTE: driving the full
+# real model through the simplified Pi05Orchestrator additionally requires
+# aligning the KV-cache plumbing with openpi's sample_actions (tracked as a
+# bring-up follow-up); per-submodule quantize/compile works today.
+_OPENPI_STAGE_ATTR = {
+    "vit": ("paligemma_with_expert", "paligemma", "vision_tower"),
+    "llm_prefix": ("paligemma_with_expert", "paligemma", "language_model"),
+    "action_expert": ("paligemma_with_expert", "gemma_expert"),
+}
+
+
+def _resolve_attr_path(root, path: tuple[str, ...]):
+    obj = root
+    for attr in path:
+        obj = getattr(obj, attr)
+    return obj
 
 
 class Pi05Adapter(ModelAdapter):
@@ -36,6 +55,7 @@ class Pi05Adapter(ModelAdapter):
         super().__init__(config or Pi05Config())
         self.model: Pi05ReferenceModel | Any | None = None
         self._device = "cpu"
+        self._is_real_openpi = False
 
     @classmethod
     def make_config(cls, overrides: dict[str, Any] | None = None) -> Pi05Config:
@@ -52,11 +72,11 @@ class Pi05Adapter(ModelAdapter):
         return self
 
     def _load_openpi(self, device: str):
-        """Best-effort load of the real openpi PI0Pytorch model.
+        """Load the real openpi PI0Pytorch model and (optionally) a checkpoint.
 
-        Kept intentionally thin: real checkpoint loading + transformers_replace
-        wiring is part of the NVIDIA bring-up phase. Falls back to the reference
-        model with a warning so the pipeline never hard-fails for the MVP.
+        Supports ``.pt`` / ``.pth`` (torch) and ``.safetensors`` checkpoints, with
+        a partial-load report. Falls back to the reference model with a warning so
+        the pipeline never hard-fails for the MVP.
         """
         try:
             from openpi.models.pi0_config import Pi0Config
@@ -72,19 +92,43 @@ class Pi05Adapter(ModelAdapter):
             )
             model = PI0Pytorch(pi0_cfg)
             if self.config.checkpoint:
-                state = torch.load(self.config.checkpoint, map_location=device)
-                model.load_state_dict(state, strict=False)
+                self._load_checkpoint(model, self.config.checkpoint, device)
+            self._is_real_openpi = True
             return model.to(device).eval()
         except Exception as exc:  # noqa: BLE001 - graceful MVP fallback
             logger.warning(
                 "Falling back to pi05 reference model (could not load openpi: %s)", exc
             )
             self.config.use_reference = True
+            self._is_real_openpi = False
             return Pi05ReferenceModel(self.config).to(device).eval()
+
+    @staticmethod
+    def _load_checkpoint(model, checkpoint: str, device: str) -> None:
+        if checkpoint.endswith(".safetensors"):
+            from safetensors.torch import load_file
+
+            state = load_file(checkpoint, device=device)
+        else:
+            state = torch.load(checkpoint, map_location=device)
+            if isinstance(state, dict) and "model" in state and isinstance(state["model"], dict):
+                state = state["model"]
+        missing, unexpected = model.load_state_dict(state, strict=False)
+        logger.info(
+            "Loaded checkpoint %s (missing=%d, unexpected=%d keys)",
+            checkpoint,
+            len(missing),
+            len(unexpected),
+        )
 
     def stage_module(self, stage: str):
         if self.model is None:
             raise RuntimeError("Call build() before stage_module().")
+        if self._is_real_openpi:
+            path = _OPENPI_STAGE_ATTR.get(stage)
+            if path is None:
+                raise KeyError(f"Unknown pi05 stage {stage!r}.")
+            return _resolve_attr_path(self.model, path)
         attr = _STAGE_ATTR.get(stage)
         if attr is None:
             raise KeyError(f"Unknown pi05 stage {stage!r}.")

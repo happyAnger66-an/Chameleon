@@ -47,25 +47,40 @@ def _run_context(task: TaskConfig) -> RunContext:
         options["num_steps"] = task.infer.num_steps
     requested_device = task.infer.torch_device or platform.torch_device
     options["torch_device"] = _resolve_torch_device(requested_device)
+    options["enable_cuda_graph"] = task.infer.cuda_graph
     return RunContext(platform=platform, architecture=task.architecture, options=options)
 
 
-def run_infer(task: TaskConfig) -> torch.Tensor:
-    """Build a session and run a single inference, returning the action chunk."""
+def run_infer(
+    task: TaskConfig,
+    *,
+    stage_artifacts: dict[str, Artifact] | None = None,
+    stage_runtimes: dict[str, str] | None = None,
+) -> torch.Tensor:
+    """Build a session and run a single inference, returning the action chunk.
+
+    ``stage_artifacts`` injects compiled engines (closing the compile->infer loop);
+    ``stage_runtimes`` overrides the per-stage runtime (e.g. ``tensorrt`` for
+    stages that have an engine), otherwise the task's ``stage_runtimes`` is used.
+    """
     ctx = _run_context(task)
     adapter = build_adapter(task, device=ctx.torch_device)
     observation = adapter.example_observation(task.infer.batch_size, device=ctx.torch_device)
-    session = InferenceSession(adapter, ctx, stage_runtimes=task.stage_runtimes).build()
+    runtimes = stage_runtimes if stage_runtimes is not None else task.stage_runtimes
+    session = InferenceSession(
+        adapter, ctx, stage_runtimes=runtimes, stage_artifacts=stage_artifacts
+    ).build()
     return session.infer(observation)
 
 
 def run_quantize(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> None:
     platform = get_platform(task.platform)
+    device = getattr(adapter, "_device", "cpu")
     for step in task.quantize:
         module = adapter.stage_module(step.stage)
         method = get_quant_method(step.method)
         # MVP calibrator: a couple of example observations exercising the stage.
-        obs = adapter.example_observation(task.infer.batch_size)
+        obs = adapter.example_observation(task.infer.batch_size, device=device)
         samples = _stage_calib_samples(adapter, step.stage, obs)
         calibrator = TensorCalibrator(samples)
         qcfg = QuantConfig(
@@ -87,23 +102,35 @@ def run_quantize(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) ->
         logger.info("Quantized stage %s with %s -> %s", step.stage, step.method, meta.component_dtypes)
 
 
-def run_compile(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> None:
+def run_compile(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> dict[str, Artifact]:
+    """Compile each stage; returns the successfully built engine artifacts by stage."""
     from chameleon.compile.base import get_compiler
 
     platform = get_platform(task.platform)
     ctx = CompileContext(platform=platform, output_dir=task.output_dir, architecture=task.architecture)
     capture = get_graph_capture("onnx")
     compiler = get_compiler(platform.compiler)
+    engines: dict[str, Artifact] = {}
+    device = getattr(adapter, "_device", "cpu")
     for step in task.compile:
         try:
             module = adapter.stage_module(step.stage)
-            obs = adapter.example_observation(task.infer.batch_size)
+            obs = adapter.example_observation(task.infer.batch_size, device=device)
             example_inputs = _stage_example_inputs(adapter, step.stage, obs)
+            input_names, output_names = _stage_io_names(step.stage)
             onnx_path = f"{task.output_dir}/{step.stage}.onnx"
-            graph = capture.capture(module, example_inputs, stage=step.stage, output_path=onnx_path)
+            graph = capture.capture(
+                module,
+                example_inputs,
+                stage=step.stage,
+                output_path=onnx_path,
+                input_names=input_names,
+                output_names=output_names,
+            )
             manifest.add(graph)
             engine = compiler.compile(graph, None, ctx, step.options)
             manifest.add(engine)
+            engines[step.stage] = engine
             logger.info("Compiled stage %s -> %s", step.stage, engine.path)
         except Exception as exc:  # noqa: BLE001
             # Scaffold backends, partial toolchains and export edge-cases degrade
@@ -120,6 +147,22 @@ def run_compile(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> 
                     metadata={"compiler": platform.compiler, "reason": str(exc)[:200]},
                 )
             )
+    return engines
+
+
+# Canonical per-stage I/O tensor names. The input order matches both the stage
+# forward signature and the order the orchestrator passes values, so the TRT
+# runtime can bind positionally.
+_STAGE_IO_NAMES: dict[str, tuple[list[str], list[str]]] = {
+    "vit": (["images"], ["output"]),
+    "llm_prefix": (["img_tokens", "lang_tokens"], ["output"]),
+    "action_expert": (["state", "prefix_memory", "x_t", "time_emb"], ["output"]),
+}
+
+
+def _stage_io_names(stage: str) -> tuple[list[str] | None, list[str] | None]:
+    names = _STAGE_IO_NAMES.get(stage)
+    return names if names is not None else (None, None)
 
 
 def _stage_example_inputs(adapter: ModelAdapter, stage: str, obs: dict[str, Any]):
@@ -132,10 +175,11 @@ def _stage_example_inputs(adapter: ModelAdapter, stage: str, obs: dict[str, Any]
     if stage == "action_expert":
         cfg = adapter.config
         b = obs["state"].shape[0]
+        device = obs["state"].device
         img_tokens = adapter.stage_module("vit")(obs["images"])
         prefix = adapter.stage_module("llm_prefix")(img_tokens, obs["lang_tokens"])
-        x_t = torch.randn(b, cfg.action_horizon, cfg.action_dim)
-        time_emb = torch.randn(b, getattr(adapter, "time_embed_dim", cfg.action_dim))
+        x_t = torch.randn(b, cfg.action_horizon, cfg.action_dim, device=device)
+        time_emb = torch.randn(b, getattr(adapter, "time_embed_dim", cfg.action_dim), device=device)
         return (obs["state"], prefix, x_t, time_emb)
     raise KeyError(f"No example inputs defined for stage {stage!r}.")
 

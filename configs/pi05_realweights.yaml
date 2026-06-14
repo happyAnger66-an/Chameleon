@@ -1,0 +1,31 @@
+# pi05 with REAL openpi weights (not the reference surrogate).
+#
+# Requires: the openpi runtime importable, transformers_replace installed, and a
+# checkpoint. Set use_reference=false and point checkpoint at a .pt/.pth/.safetensors.
+#
+# Status: real-weight LOADING + per-submodule quantize/compile are supported.
+# Driving the full real model through the simplified orchestrator additionally
+# needs KV-cache plumbing alignment with openpi sample_actions (bring-up TODO),
+# so this config defaults to quantize-only.
+
+architecture: pi05
+model: pi05
+platform: nvidia_orin
+output_dir: output/pi05_realweights
+
+actions:
+  - quantize
+
+model_overrides:
+  use_reference: false
+  checkpoint: /path/to/pi05_checkpoint.pt
+  action_dim: 32
+  action_horizon: 50
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+
+quantize:
+  - stage: action_expert
+    method: fp8
+    weight_dtype: fp8
+    kv_cache_dtype: fp8

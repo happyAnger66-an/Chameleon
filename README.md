@@ -68,6 +68,10 @@ chameleon infer --config configs/pi05_cpu.yaml
 chameleon workflow --config configs/pi05_nvidia.yaml --dry-run
 chameleon workflow --config configs/pi05_nvidia.yaml
 
+# Closed compile->infer loop: compile each stage to a TensorRT engine, then run
+# inference ON those engines (not the PyTorch reference path). NVIDIA + CUDA only.
+chameleon workflow --config configs/pi05_nvidia_trt.yaml
+
 # Measure latency.
 chameleon profile --config configs/pi05_cpu.yaml --runs 20
 ```
@@ -84,13 +88,18 @@ actions = run_infer(task)   # [B, action_horizon, action_dim]
 
 ## Status
 
-This is the MVP scaffold:
-
 - **Functional**: core abstractions, registries, pi05 reference model, PyTorch
   runtime, the VLA orchestrator (real flow-matching denoise loop), config, CLI,
   workflow runner.
-- **Scaffolded (clear interface, NVIDIA-first)**: ONNX export, modelopt
-  quantization, TensorRT compile + runtime, the `fmha_d256` kernel.
+- **NVIDIA path (Phase 2, verified on-box)**: TensorRT compile + runtime with a
+  declarative `TensorRegistry`, positional binding, persistent device buffers,
+  `enqueueV3` and optional CUDA Graph; the **compile->infer loop is closed and
+  numerically validated** (TRT FP16 vs PyTorch `cosine=1.0`, `max_abs≈1.25e-3`).
+  Dual prefill/decode optimization profiles; `fmha_d256` as a real
+  `torch.library` custom op with ONNX symbolic; real-openpi checkpoint loading.
+- **Known bring-up items**: ONNX QDQ export of modelopt-quantized modules, real
+  model end-to-end through the orchestrator, on-device Orin/Thor + CuTe DSL
+  plugin build. These degrade gracefully today.
 - **Stubs (informative `NotImplementedError`)**: OpenVINO / TVM / Horizon
   compile backends.
 

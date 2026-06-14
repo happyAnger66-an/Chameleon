@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import logging
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -9,6 +11,27 @@ import torch
 
 from chameleon.core.artifact import Artifact
 from chameleon.frontend.base import GraphCapture, register_graph_capture
+
+logger = logging.getLogger(__name__)
+
+
+def _modelopt_export_ctx(module: Any):
+    """Enter modelopt's export mode when the module has been quantized by modelopt.
+
+    modelopt fake-quant ops only translate to ONNX QDQ nodes inside this context;
+    otherwise the (dynamo) exporter fails on the custom autograd functions. No-op
+    when modelopt is absent or the module is not quantized.
+    """
+    try:
+        from modelopt.torch.quantization.nn import TensorQuantizer
+        from modelopt.torch.quantization.utils import export_torch_mode
+
+        has_quantizer = any(isinstance(m, TensorQuantizer) for m in module.modules())
+        if has_quantizer:
+            return export_torch_mode()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("modelopt export mode unavailable: %s", exc)
+    return contextlib.nullcontext()
 
 
 class OnnxExport(GraphCapture):
@@ -43,12 +66,13 @@ class OnnxExport(GraphCapture):
             opset_version=self.opset,
         )
         try:
-            with torch.no_grad():
+            with torch.no_grad(), _modelopt_export_ctx(module):
                 try:
                     torch.onnx.export(module, tuple(example_inputs), str(path), **kwargs)
                 except Exception:  # noqa: BLE001
                     # The dynamo exporter's optimizer can choke on some ops
-                    # (e.g. nn.MultiheadAttention). Retry with the legacy path.
+                    # (e.g. nn.MultiheadAttention) and on modelopt fake-quant.
+                    # Retry with the legacy TorchScript exporter.
                     torch.onnx.export(
                         module, tuple(example_inputs), str(path), dynamo=False, **kwargs
                     )

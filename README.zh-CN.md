@@ -58,6 +58,10 @@ chameleon infer --config configs/pi05_cpu.yaml
 chameleon workflow --config configs/pi05_nvidia.yaml --dry-run
 chameleon workflow --config configs/pi05_nvidia.yaml
 
+# compile→infer 闭环：将各 stage 编译为 TensorRT engine，并真正在这些 engine 上推理
+#（非 PyTorch 参考路径）。仅 NVIDIA + CUDA。
+chameleon workflow --config configs/pi05_nvidia_trt.yaml
+
 # 测量推理延迟
 chameleon profile --config configs/pi05_cpu.yaml --runs 20
 ```
@@ -74,10 +78,9 @@ actions = run_infer(task)   # [B, action_horizon, action_dim]
 
 ## 当前状态
 
-本项目为 MVP 脚手架：
-
 - **已可用**：核心抽象与注册表、pi05 参考模型、PyTorch 运行时、VLA orchestrator（真实 flow-matching 去噪环）、配置系统、CLI、workflow runner。
-- **脚手架（接口完整，NVIDIA 优先）**：ONNX 导出、modelopt 量化、TensorRT 编译与运行时、`fmha_d256` 自定义算子示例。
+- **NVIDIA 路径（阶段二，已本机验证）**：TensorRT 编译与运行时，含声明式 `TensorRegistry`、位置绑定、持久化设备缓冲、`enqueueV3` 与可选 CUDA Graph；**compile→infer 闭环已打通并数值校验**（TRT FP16 vs PyTorch `cosine=1.0`、`max_abs≈1.25e-3`）；prefill/decode 双 optimization profile；`fmha_d256` 升级为真实 `torch.library` custom op + ONNX symbolic；真实 openpi checkpoint 加载。
+- **已知后续 bring-up**：modelopt 量化模块的 ONNX QDQ 导出、真实模型经编排器端到端、Orin/Thor 实测与 CuTe DSL plugin 构建——目前均优雅降级。
 - **占位（`NotImplementedError` + 集成说明）**：OpenVINO / TVM / 地平线编译后端。
 
 分阶段路线图见 [docs/arch.md](docs/arch.md) 第 8 节。

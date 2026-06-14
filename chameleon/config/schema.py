@@ -32,6 +32,11 @@ class InferConfig(BaseModel):
     batch_size: int = 1
     num_steps: int | None = None
     torch_device: str | None = None
+    use_compiled_engines: bool = False
+    """When true, infer consumes the engines produced by the compile step
+    (per stage) via the platform runtime, instead of the PyTorch reference path."""
+    cuda_graph: bool = False
+    """Capture/replay a CUDA graph per engine (TensorRT runtime; static shapes)."""
 
 
 class TaskConfig(BaseModel):

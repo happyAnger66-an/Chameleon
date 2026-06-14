@@ -232,13 +232,29 @@ openpi checkpoint / 参考模型
 | 组件 | 状态 |
 |------|------|
 | `core` / `architectures` / `models(pi05)` / `runtime(pytorch)` / `VLAOrchestrator` / `config` / `cli` / `workflows` | **功能完整、可运行** |
-| `frontend/onnx_export`(dynamo→legacy 回退) | 完整 |
-| `quantization`(int8/int8_sq/fp8/int4_awq/w4a8_awq/nvfp4,封装 ModelOpt) | 接口完整;缺 modelopt 时降级为 metadata-only |
-| `compile/tensorrt` + `runtime/tensorrt` | TensorRT 可用(本机已验证三 stage 真实 build engine);runtime 反序列化路径脚手架 |
-| `kernels/fmha_d256` | 三段式示例(cpu reference 可用,nvidia plugin 占位) |
+| `frontend/onnx_export`(dynamo→legacy 回退 + modelopt 导出模式) | 完整 |
+| `quantization`(int8/int8_sq/fp8/int4_awq/w4a8_awq/nvfp4,封装 ModelOpt) | 接口完整;有 modelopt 时真实插入量化器,缺失时降级为 metadata-only |
+| `compile/tensorrt` | **可用**:三 stage 真实 build engine;支持插件预加载、FP16/INT8/FP8 flag、prefill/decode 双 optimization profile |
+| `runtime/tensorrt`(`TensorRegistry` 声明式绑定 + 位置绑定 + 设备缓冲 + enqueueV3 + 可选 CUDA Graph) | **可用**:已验证 compile→infer 闭环,TRT vs PyTorch cosine=1.0(FP16 精度差 ~1e-3) |
+| `kernels/fmha_d256` | 三段式:真实 `torch.library` custom op(`torch.ops.chameleon.fmha_d256`,eager=SDPA)+ ONNX symbolic + nvidia plugin 占位(按 kernel_tag 选 artifact) |
 | `compile/openvino` / `compile/tvm` / `compile/horizon` | Stub,含集成方案说明,`NotImplementedError` |
 
-**鲁棒性设计**:缺 modelopt / 特定工具链 / GPU 时,量化、编译、设备选择均优雅降级(记录 `compile_skipped` 血缘并继续),保证 MVP 全链路在任意机器可跑。
+**鲁棒性设计**:缺 modelopt / 特定工具链 / GPU 时,量化、编译、设备选择均优雅降级(记录 `compile_skipped` 血缘并继续),保证全链路在任意机器可跑。
+
+### 阶段二已落地(NVIDIA 深化)
+
+- **compile→infer 闭环**:`InferConfig.use_compiled_engines=true` 时,compile 产出的 engine 经 `stage_artifacts` 注入 `InferenceSession`,推理真实运行在 TRT engine 上(非 PyTorch 参考路径)。见 `configs/pi05_nvidia_trt.yaml`。
+- **数值校验**:同权重下 TRT(FP16)与 PyTorch 输出 `cosine=1.000000`、`max_abs≈1.25e-3`。
+- **TensorRT runtime**:`TensorRegistry` 发现 I/O、按位置绑定(规避 ONNX 名重命名)、持久化设备缓冲(去噪环复用)、`execute_async_v3`、可选 CUDA Graph 捕获/重放。
+- **双 optimization profile**:编译器支持 `cfg["profiles"]`(context/prefill + generation/decode),runtime 按 `profile_index` 选择;静态 shape 的参考路径下为 no-op。
+- **fmha_d256**:升级为真实 torch custom op + ONNX symbolic,nvidia 实现按 `kernel_tag`(sm_87/sm_101)解析 plugin artifact。
+- **真实 openpi 权重**:`use_reference=false` + `checkpoint`(支持 .pt/.pth/.safetensors,partial-load 报告);真实模型按 `_OPENPI_STAGE_ATTR` 映射出三 stage 子模块。见 `configs/pi05_realweights.yaml`。
+
+### 阶段二未尽事项(后续 bring-up)
+
+- **量化模型 ONNX 导出**:modelopt 已量化模块(fake-quant 算子)经标准导出器翻译失败,当前优雅跳过 compile。需对齐 modelopt 的 ONNX QDQ 导出路径(版本敏感)。
+- **真实模型编排**:真实 `PI0Pytorch` 经简化 `Pi05Orchestrator` 端到端推理需对齐 KV-cache plumbing(openpi `sample_actions` 的 prefix KV + adaRMS),当前仅支持按子模块量化/编译。
+- **on-device**:Orin/Thor 实测、`fmha_d256` CuTe DSL 真实 plugin 构建与链接。
 
 ### 验证命令
 
@@ -246,9 +262,9 @@ openpi checkpoint / 参考模型
 chameleon platforms        # 列出 7 个平台
 chameleon architectures    # pi05 三 stage
 chameleon info             # 已注册的 compilers/runtimes/quant/kernels
-chameleon infer    --config configs/pi05_cpu.yaml      # → action (1,50,32)
-chameleon workflow --config configs/pi05_nvidia.yaml   # quantize→compile(真实TRT)→infer
-chameleon workflow --config configs/pi05_nvidia.yaml --dry-run
+chameleon infer    --config configs/pi05_cpu.yaml          # → action (1,50,32)
+chameleon workflow --config configs/pi05_nvidia.yaml       # quantize→compile→infer(参考路径)
+chameleon workflow --config configs/pi05_nvidia_trt.yaml   # compile→infer,推理跑在 TRT engine 上
 chameleon profile  --config configs/pi05_cpu.yaml --runs 20
 ```
 
@@ -278,7 +294,7 @@ chameleon profile  --config configs/pi05_cpu.yaml --runs 20
 ## 8. 分阶段路线图
 
 - **阶段一(已完成,本 MVP)**:全部核心抽象 + 注册表 + pi05 参考模型 + PyTorch 运行时 + VLAOrchestrator + TensorRT 编译路径,端到端跑通。
-- **阶段二(NVIDIA 深化)**:打通真实 openpi 权重加载;ONNX 导出对齐 pi05 真实结构(head_dim=256 attention、adaRMS);TensorRT runtime 落地(`TensorRegistry` 声明式绑定 + prefill/decode 双 profile + CUDA Graph);接入 `fmha_d256` CuTe DSL plugin;pi05 在 Orin/Thor 跑通量化推理。
+- **阶段二(NVIDIA 深化,主体已完成)**:TensorRT runtime 落地(`TensorRegistry` 声明式绑定 + prefill/decode 双 profile + 可选 CUDA Graph)、**compile→infer 闭环已打通并数值校验(cosine=1.0)**、`fmha_d256` 升级为真实 torch custom op + ONNX symbolic、真实 openpi 权重加载(多格式 + stage 子模块映射)。**未尽**:量化模型 ONNX QDQ 导出、真实模型经编排器端到端、Orin/Thor 实测与 CuTe DSL plugin 构建(见上节)。
 - **阶段三(通用平台)**:接入 TVM(AMD GPU / 通用 CPU,Relax + DLight)与 Intel OpenVINO(+ NNCF INT8)。
 - **阶段四(专用 NPU)**:地平线 BPU 经 TVM BYOC 或 `hb_mapper` 接入;跨平台 kernel 自动调度;权重 / Model Library / Runtime 三分离以支持 OTA。
 
@@ -294,6 +310,7 @@ chameleon profile  --config configs/pi05_cpu.yaml --runs 20
 | ONNX 导出 | `chameleon/frontend/onnx_export.py` |
 | 量化方法 | `chameleon/quantization/methods/modelopt_ptq.py` |
 | TensorRT 编译 | `chameleon/compile/tensorrt/backend.py` |
+| TensorRT 运行时(TensorRegistry/CUDA Graph) | `chameleon/runtime/tensorrt/backend.py` |
 | 非 NVIDIA 编译 stub | `chameleon/compile/stubs.py` |
 | 自定义算子示例 | `chameleon/kernels/fmha/fmha_d256.py` |
 | 编排 + Session | `chameleon/runtime/orchestrator.py` |

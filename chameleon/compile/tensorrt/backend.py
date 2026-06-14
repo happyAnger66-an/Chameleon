@@ -36,8 +36,13 @@ class TensorRTCompiler(CompilerBackend):
 
     def _preload_plugins(self, plugin_libs: Sequence[str]) -> None:
         # Plugins must be loaded RTLD_GLOBAL before the ONNX parser runs so the
-        # parser can resolve custom op symbols (matches model_optimizer).
+        # parser can resolve custom op symbols (matches model_optimizer). Missing
+        # libraries (plugins not yet built) are skipped with a warning so the
+        # build of plugin-free graphs still proceeds.
         for lib in plugin_libs:
+            if not Path(lib).exists():
+                logger.warning("TRT plugin library not found, skipping preload: %s", lib)
+                continue
             ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
             logger.info("Loaded TRT plugin library: %s", lib)
 
@@ -81,8 +86,11 @@ class TensorRTCompiler(CompilerBackend):
 
         build_config = builder.create_builder_config()
         self._apply_precision_flags(builder, build_config, quant_meta, ctx)
-        # Context (prefill) + generation (decode) profiles would be added here
-        # from cfg["profiles"].
+        if "workspace_mb" in cfg:
+            build_config.set_memory_pool_limit(
+                trt.MemoryPoolType.WORKSPACE, int(cfg["workspace_mb"]) << 20
+            )
+        num_profiles = self._add_optimization_profiles(builder, build_config, cfg)
 
         serialized = builder.build_serialized_network(network, build_config)
         if serialized is None:
@@ -97,8 +105,33 @@ class TensorRTCompiler(CompilerBackend):
             metadata={
                 "compiler": self.name,
                 "quant": quant_meta.component_dtypes if quant_meta else {},
+                "num_profiles": num_profiles,
             },
         )
+
+    @staticmethod
+    def _add_optimization_profiles(builder, build_config, cfg: dict) -> int:
+        """Add optimization profiles for dynamic shapes.
+
+        ``cfg["profiles"]`` is a list of profiles (e.g. a context/prefill profile
+        and a generation/decode profile). Each profile maps an input tensor name
+        to ``{"min": [...], "opt": [...], "max": [...]}``. Static-shape engines
+        (the pi05 reference path) need no profiles, so this is a no-op then.
+        """
+        profiles = cfg.get("profiles") or []
+        count = 0
+        for profile_spec in profiles:
+            profile = builder.create_optimization_profile()
+            for tensor_name, dims in profile_spec.items():
+                profile.set_shape(
+                    tensor_name,
+                    min=tuple(dims["min"]),
+                    opt=tuple(dims["opt"]),
+                    max=tuple(dims["max"]),
+                )
+            build_config.add_optimization_profile(profile)
+            count += 1
+        return count
 
     @staticmethod
     def _apply_precision_flags(builder, build_config, quant_meta, ctx) -> None:
