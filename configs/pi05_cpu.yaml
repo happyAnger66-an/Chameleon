@@ -1,0 +1,14 @@
+# Minimal infer-only task running the pi05 reference model on CPU.
+# Useful as the end-to-end smoke test for the orchestrator + flow-matching loop.
+
+architecture: pi05
+model: pi05
+platform: generic_cpu
+output_dir: output/pi05_cpu
+
+actions:
+  - infer
+
+infer:
+  batch_size: 1
+  num_steps: 10

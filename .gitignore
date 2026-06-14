@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Testing / coverage / type checking
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Packaging / installers
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Chameleon workflow outputs
+output/
+logs/
+tmp/
+*.log
+
+# Compiled / exported model artifacts
+*.engine
+*.onnx
+*.onnx.data
+*.plan
+*.trt
+*.xml
+*.bin
+chameleon_manifest.json
+
+# Weights / checkpoints / calibration data
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+*.npz
+*.npy
+params_shard_*.bin
+tensor-cache.json
+calibrate/
+calibration/
+
+# TensorRT / ONNX / plugin build artifacts
+*.so.dbg
+*.plugin
+lib*.so
+
+# Profiling / benchmark dumps
+*.prof
+*.trace
+*.nsys-rep
+*.qdrep

@@ -1,0 +1,52 @@
+# Example Chameleon task: quantize + compile + infer pi05 for an NVIDIA Orin target.
+#
+# On an NVIDIA box with TensorRT installed this runs the full pipeline. On a
+# CPU-only dev box the quantize step degrades to metadata-only, the compile step
+# reports what a TensorRT build would do, and infer runs the PyTorch reference
+# path through the orchestrator.
+
+architecture: pi05
+model: pi05
+platform: nvidia_orin
+output_dir: output/pi05_nvidia
+
+actions:
+  - quantize
+  - compile
+  - infer
+
+# Adapter config overrides (see Pi05Config). Defaults match openpi pi0.5.
+model_overrides:
+  action_dim: 32
+  action_horizon: 50
+  num_denoise_steps: 10
+
+# Per-stage runtime backend. Demonstrates stage-level backend mixing; here every
+# stage uses the PyTorch reference runtime so the MVP runs anywhere.
+stage_runtimes:
+  vit: pytorch
+  llm_prefix: pytorch
+  action_expert: pytorch
+
+quantize:
+  - stage: vit
+    method: fp8
+    weight_dtype: fp8
+    activation_dtype: fp8
+  - stage: llm_prefix
+    method: int8
+    weight_dtype: int8
+    activation_dtype: int8
+  - stage: action_expert
+    method: fp8
+    weight_dtype: fp8
+    kv_cache_dtype: fp8
+
+compile:
+  - stage: vit
+  - stage: llm_prefix
+  - stage: action_expert
+
+infer:
+  batch_size: 1
+  num_steps: 10
