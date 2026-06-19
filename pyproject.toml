@@ -13,14 +13,33 @@ dependencies = [
     "numpy>=1.24",
     "pydantic>=2.0",
     "pyyaml>=6.0",
+    # ONNX export (frontend) + TRT build preflight (deploy/trt_build.py)
+    "onnx>=1.16.0",
 ]
 
 [project.optional-dependencies]
-# Platform toolchains are optional; install what your target needs.
-nvidia = ["tensorrt", "nvidia-modelopt"]
-onnx = ["onnx", "onnxruntime"]
+# Pi05 ONNX export + TensorRT engine build (configs/pi05_libero_trt_deploy.yaml).
+# Requires NVIDIA CUDA driver/toolkit on the build machine; install into your openpi venv, e.g.:
+#   pip install -e ".[deploy]"
+deploy = [
+    "tensorrt>=10.0.0",
+    "onnxruntime>=1.17",
+    "transformers>=4.40",
+    "safetensors>=0.4",
+]
+# Platform toolchains — install what your target needs.
+nvidia = [
+    "tensorrt>=10.0.0",
+    "nvidia-modelopt",
+    "onnxruntime>=1.17",
+]
+onnx = [
+    "onnxruntime>=1.17",
+]
 intel = ["openvino", "nncf"]
 tvm = ["apache-tvm"]
+eval-ui = ["websockets>=12", "opencv-python-headless>=4.8"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
 chameleon = "chameleon.cli:main"
@@ -28,6 +47,16 @@ chameleon = "chameleon.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["chameleon*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+markers = [
+    "e2e: end-to-end tests",
+    "e2e_slow: slow e2e (real infer on reference model)",
+    "e2e_gpu: requires GPU and openpi weights",
+]
 
 [tool.ruff]
 line-length = 100

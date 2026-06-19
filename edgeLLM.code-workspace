@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../model_optimizer"
+		},
+		{
+			"path": "../starVLA"
 		}
 	],
 	"settings": {}

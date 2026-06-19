@@ -1,0 +1,60 @@
+# pi05 在真实 LeRobot LIBERO 数据上的离线动作评测（RTX 4070, sm_89）。
+#
+# 流程：dataloader 读 LeRobot libero 数据 → openpi 训练策略（含 norm/tokenize/
+#       输入输出 transform）逐帧推理 → 与 ground-truth 动作对比（max_abs /
+#       mean_abs / cosine）→ 汇总。
+#
+# 前置条件：
+#   - 在可 import openpi + lerobot 的环境运行（见 README 真实权重说明）：
+#       PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli eval \
+#           --config configs/pi05_libero_eval.yaml
+#   - pi05 PyTorch 权重：models/openpi/pytorch/model.safetensors
+#   - norm_stats（openpi-assets pi05_libero）：
+#       ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+#   - 本地完整 LeRobot 数据集（缺帧会触发联网下载）。
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_libero_eval
+
+actions:
+  - eval
+
+model_overrides:
+  use_reference: false
+  checkpoint: /home/zhangxa/codes/edgeLLM/Chamleon/models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+
+infer:
+  torch_device: cuda
+
+data:
+  dataset: pi05_libero
+  openpi_config: pi05_libero
+  # 用本地完整数据集；缺省 physical-intelligence/libero 若不全会触发联网下载。
+  repo_id: your_hf_username/libero
+  start_index: 0
+  num_samples: 20
+
+evaluate:
+  # 含 model.safetensors 的目录（缺省时取 model_overrides.checkpoint 的父目录）。
+  checkpoint_dir: /home/zhangxa/codes/edgeLLM/Chamleon/models/openpi/pytorch
+  # checkpoint 目录无 assets/ 时，从 openpi-assets 显式加载 norm_stats。
+  norm_stats_dir: /home/zhangxa/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+  asset_id: physical-intelligence/libero
+  policy_runner: openpi          # openpi | chameleon（InferenceSession / Pi05RealOrchestrator）
+  num_samples: 20
+  stride: 1
+  compare_horizon: null      # 全 action_horizon
+  device: cuda
+  viewer: console            # console | webui | both
+  webui_host: 127.0.0.1
+  webui_port: 8765
+  webui_path: /ws
+  webui_history_size: 200
+  webui_show_wrist: true

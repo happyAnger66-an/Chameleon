@@ -1,0 +1,38 @@
+# pi05 on a desktop NVIDIA RTX 4070 (Ada Lovelace, sm_89).
+#
+# 当前可跑通的路径：参考模型（use_reference=true，默认）经 TensorRT 编译为
+# 三个 engine，并真正在这些 engine 上推理（compile -> infer 闭环）。
+# 已在 NVIDIA + CUDA + TensorRT 环境验证（TRT FP16 vs PyTorch cosine=1.0）。
+#
+# 前置条件：
+#   pip install -e ".[nvidia]"   # tensorrt + nvidia-modelopt
+#   GPU 驱动 + CUDA + 与 torch 匹配的 TensorRT
+#
+# 运行：
+#   chameleon workflow --config configs/pi05_rtx4070.yaml
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada          # sm_89 / RTX 4070（kernel_tag=sm_89, dtypes 含 fp8）
+output_dir: output/pi05_rtx4070
+
+actions:
+  - compile
+  - infer
+
+model_overrides:
+  action_dim: 32
+  action_horizon: 50
+  num_denoise_steps: 10
+
+compile:
+  - stage: vit
+  - stage: llm_prefix
+  - stage: action_expert
+
+infer:
+  batch_size: 1
+  num_steps: 10
+  torch_device: cuda
+  use_compiled_engines: true   # 消费上面编译出的 engine，而非 PyTorch 参考路径
+  cuda_graph: false            # 静态 shape 下可设 true，对去噪环做 CUDA Graph 捕获/重放

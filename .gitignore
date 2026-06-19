@@ -85,3 +85,4 @@ lib*.so
 *.trace
 *.nsys-rep
 *.qdrep
+models/

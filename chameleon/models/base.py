@@ -48,6 +48,16 @@ class ModelAdapter(ABC):
     def example_observation(self, batch_size: int = 1, device: str = "cpu") -> dict[str, Any]:
         """Return a representative observation dict used for tracing / smoke tests."""
 
+    @property
+    def orchestrator_key(self) -> str | None:
+        """可选：覆盖架构默认编排器的 key。
+
+        默认返回 None（使用 ArchitectureSpec.orchestrator）。当具体模型需要
+        不同的控制流时（如真实 openpi 模型需完整 KV-cache plumbing），适配器
+        可返回另一个已注册的编排器 key。
+        """
+        return None
+
     # --- metadata used by the orchestrator -------------------------------
     @property
     def action_dim(self) -> int:

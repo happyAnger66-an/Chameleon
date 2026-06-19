@@ -1,0 +1,23 @@
+# 测试用最小 eval TaskConfig（不触发真实 openpi 加载）。
+architecture: pi05
+model: pi05
+platform: generic_cpu
+output_dir: output/test_eval_smoke
+
+actions:
+  - eval
+
+model_overrides:
+  action_horizon: 10
+  action_dim: 7
+
+data:
+  dataset: pi05_libero
+  start_index: 0
+  num_samples: 25
+
+evaluate:
+  num_samples: 25
+  stride: 1
+  viewer: console
+  policy_runner: openpi

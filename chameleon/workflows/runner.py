@@ -16,7 +16,8 @@ import logging
 
 import torch
 
-from chameleon.api import build_adapter, run_compile, run_infer, run_quantize
+from chameleon.api import build_adapter, run_compile, run_deploy_build, run_export, run_infer, run_quantize
+from chameleon.deploy.backends import is_pi05_deploy_backend
 from chameleon.config.schema import TaskConfig
 from chameleon.core.artifact import Artifact, Manifest
 
@@ -39,6 +40,15 @@ class WorkflowRunner:
             if action == "quantize":
                 for s in self.task.quantize:
                     lines.append(f"  quantize: stage={s.stage} method={s.method}")
+            elif action == "export":
+                backend = self.task.deploy.backend
+                export_dir = self.task.deploy.export_dir or f"{self.task.output_dir}/onnx"
+                for s in self.task.export or []:
+                    lines.append(f"  export:   stage={s.stage} backend={backend}")
+                if not self.task.export:
+                    lines.append(
+                        f"  export:   default stages vit/llm/expert/denoise -> {export_dir}"
+                    )
             elif action == "compile":
                 for s in self.task.compile:
                     lines.append(f"  compile:  stage={s.stage} options={s.options}")
@@ -55,14 +65,22 @@ class WorkflowRunner:
                 logger.info(line)
             return self.manifest
 
-        adapter = build_adapter(self.task)
+        adapter = None
         compiled_engines: dict[str, Artifact] = {}
         for action in self.task.actions:
             if action == "quantize":
+                adapter = adapter or build_adapter(self.task)
                 run_quantize(self.task, adapter, self.manifest)
+            elif action == "export":
+                run_export(self.task, self.manifest)
             elif action == "compile":
-                compiled_engines = run_compile(self.task, adapter, self.manifest)
+                if is_pi05_deploy_backend(self.task.deploy.backend):
+                    compiled_engines = run_deploy_build(self.task, self.manifest)
+                else:
+                    adapter = adapter or build_adapter(self.task)
+                    compiled_engines = run_compile(self.task, adapter, self.manifest)
             elif action == "infer":
+                adapter = adapter or build_adapter(self.task)
                 stage_artifacts, stage_runtimes = self._infer_engine_bindings(compiled_engines)
                 actions_out = run_infer(
                     self.task,

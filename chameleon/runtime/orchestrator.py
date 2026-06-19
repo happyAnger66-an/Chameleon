@@ -1,9 +1,11 @@
 """VLA 编排器 — 架构特定的链式执行与去噪环控制流。
 
 作用：
-    定义 Orchestrator ABC 和 Pi05Orchestrator（vit → llm_prefix →
-    action_expert 去噪环），以及 InferenceSession（按 stage 加载 Engine、
-    构建编排器、执行 infer）。ORCHESTRATOR_REGISTRY 按 architecture 键注册。
+    定义 Orchestrator ABC、Pi05Orchestrator（参考模型三段式 engine 链：
+    vit → llm_prefix → action_expert 去噪环）、Pi05RealOrchestrator（真实
+    openpi 模型经 sample_actions 的整模型 PyTorch 路径），以及 InferenceSession
+    （按 stage 加载 Engine、选择并构建编排器、执行 infer）。
+    ORCHESTRATOR_REGISTRY 按编排器 key 注册（"pi05" / "pi05_real"）。
 
 架构位置：
     运行时层 — 框架控制流核心。上游：architectures（stage 顺序）、
@@ -30,6 +32,14 @@ from chameleon.runtime.base import Engine, get_runtime
 
 class Orchestrator(ABC):
     architecture: str
+
+    requires_stage_engines: bool = True
+    """是否需要 InferenceSession 预先按 stage 加载 Engine。
+
+    三段式 stage 链路（如 Pi05Orchestrator）为 True；把整模型当作单一
+    PyTorch 路径的编排器（如 Pi05RealOrchestrator 直接调用 sample_actions）
+    为 False，可跳过 per-stage engine 加载。
+    """
 
     def __init__(self, adapter: ModelAdapter, engines: dict[str, Engine], ctx: RunContext) -> None:
         self.adapter = adapter
@@ -97,6 +107,40 @@ class Pi05Orchestrator(Orchestrator):
 register_orchestrator("pi05", Pi05Orchestrator, override=True)
 
 
+class Pi05RealOrchestrator(Orchestrator):
+    """真实 openpi PI0Pytorch 的端到端编排器（PyTorch 路径，不拆 stage / 不编译）。
+
+    与 Pi05Orchestrator（三段式 engine 链 + 单 tensor prefix 交接）不同，
+    真实模型的 prefix→去噪交接是 past_key_values（KV cache），并需要
+    attention mask / position_ids / adarms_cond 等完整 plumbing。这些都已
+    封装在 ``PI0Pytorch.sample_actions`` 内部，因此本编排器把整模型当作单一
+    PyTorch 推理路径，直接调用 sample_actions，绕过 per-stage engine。
+
+    选用条件：当 ``Pi05Adapter`` 包装的是真实 openpi 模型时（adapter 通过
+    ``orchestrator_key`` 指向 "pi05_real"，见 InferenceSession.build）。
+    """
+
+    architecture = "pi05"
+    requires_stage_engines = False
+
+    def infer(self, observation: dict[str, Any]) -> torch.Tensor:
+        model = getattr(self.adapter, "model", None)
+        if model is None or not getattr(self.adapter, "_is_real_openpi", False):
+            raise RuntimeError(
+                "Pi05RealOrchestrator requires a built real openpi model; "
+                "use Pi05Orchestrator for the reference path."
+            )
+        device = self.ctx.torch_device
+        num_steps = int(self.ctx.options.get("num_steps", self.adapter.num_denoise_steps))
+        obs = self.adapter.to_openpi_observation(observation, device)
+        with torch.no_grad():
+            actions = model.sample_actions(device, obs, num_steps=num_steps)
+        return actions
+
+
+register_orchestrator("pi05_real", Pi05RealOrchestrator, override=True)
+
+
 class InferenceSession:
     """Builds per-stage engines and the architecture orchestrator, then runs inference.
 
@@ -136,13 +180,17 @@ class InferenceSession:
         )
 
     def build(self) -> "InferenceSession":
-        for stage in self.arch.stage_names:
-            runtime_name = self._resolve_runtime(stage)
-            backend = get_runtime(runtime_name)
-            artifact = self._artifact_for(stage)
-            self.ctx.on_progress(f"loading stage {stage} on {runtime_name}", 0.0)
-            self._engines[stage] = backend.load(artifact, self.ctx)
-        orch_cls = ORCHESTRATOR_REGISTRY.get(self.arch.orchestrator)
+        # 适配器可覆盖架构默认编排器（如真实 openpi 模型选用 "pi05_real"）。
+        orch_key = getattr(self.adapter, "orchestrator_key", None) or self.arch.orchestrator
+        orch_cls = ORCHESTRATOR_REGISTRY.get(orch_key)
+        # 仅在编排器需要 per-stage engine 时才加载（整模型 PyTorch 路径跳过）。
+        if getattr(orch_cls, "requires_stage_engines", True):
+            for stage in self.arch.stage_names:
+                runtime_name = self._resolve_runtime(stage)
+                backend = get_runtime(runtime_name)
+                artifact = self._artifact_for(stage)
+                self.ctx.on_progress(f"loading stage {stage} on {runtime_name}", 0.0)
+                self._engines[stage] = backend.load(artifact, self.ctx)
         self._orchestrator = orch_cls(self.adapter, self._engines, self.ctx)
         return self
 

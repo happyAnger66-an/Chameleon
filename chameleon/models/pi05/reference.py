@@ -47,6 +47,9 @@ class Pi05Config:
     checkpoint: str | None = None
     paligemma_variant: str = "gemma_2b"
     action_expert_variant: str = "gemma_300m"
+    # 真实模型权重精度："bfloat16"（选择性 bf16，匹配 openpi 训练 + 省显存）
+    # 或 "float32"。仅在 use_reference=false 时生效。
+    precision: str = "bfloat16"
 
 
 def create_sinusoidal_pos_embedding(

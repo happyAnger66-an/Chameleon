@@ -1,0 +1,50 @@
+# pi05 with REAL openpi weights on an RTX 4070 (Ada Lovelace, sm_89).
+#
+# 当前架构在此配置下「已支持」：
+#   - 真实 checkpoint 加载（.pt/.pth/.safetensors）
+#   - 按子模块量化（quantize），modelopt 可用时插入真实量化器，否则降级 metadata-only
+#   - 真实模型端到端 PyTorch 推理（infer）：use_reference=false 时自动选用
+#     Pi05RealOrchestrator，直接调用 PI0Pytorch.sample_actions（KV cache +
+#     去噪环完整 plumbing 在模型内部），不拆 stage、不编译。
+#
+# 当前架构「尚不支持」（后续 bring-up）：
+#   - 真实子模块 / 量化模块的 ONNX 导出（QDQ）→ compile 到 TRT engine 会优雅跳过；
+#     因此真实模型暂只能走 PyTorch 推理，不能 use_compiled_engines=true。
+#
+# 前置条件：
+#   pip install -e ".[nvidia]"
+#   openpi 运行时可 import + transformers==4.53.2 + transformers_replace 已安装
+#   一个 pi05 checkpoint（.pt/.pth/.safetensors）
+#
+# 运行（真实权重 PyTorch 端到端推理）：
+#   chameleon infer --config configs/pi05_rtx4070_realweights.yaml
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_rtx4070_realweights
+
+actions:
+  - infer            # 真实权重 PyTorch 端到端；如需量化改成 [quantize] 或 [quantize, infer]
+
+model_overrides:
+  use_reference: false
+  # 真实 pi05 PyTorch checkpoint（openpi save_model 导出的 model.safetensors）
+  checkpoint: /home/zhangxa/codes/edgeLLM/Chamleon/models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10            # 与 checkpoint config.json 一致（不是 50）
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16           # 选择性 bf16，~3.6B 参数才放得进 12GB
+
+infer:
+  batch_size: 1
+  num_steps: 10
+  torch_device: cuda
+  use_compiled_engines: false   # 真实模型暂不支持 compile→engine，保持 PyTorch 路径
+
+quantize:
+  - stage: action_expert
+    method: fp8                # Ada(sm_89) 原生支持 FP8 E4M3
+    weight_dtype: fp8
+    kv_cache_dtype: fp8

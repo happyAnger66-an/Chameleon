@@ -76,9 +76,14 @@ class Pi05Adapter(ModelAdapter):
     def _load_openpi(self, device: str):
         """Load the real openpi PI0Pytorch model and (optionally) a checkpoint.
 
-        Supports ``.pt`` / ``.pth`` (torch) and ``.safetensors`` checkpoints, with
-        a partial-load report. Falls back to the reference model with a warning so
-        the pipeline never hard-fails for the MVP.
+        镜像 openpi 自身的 PyTorch 加载路径（见 ``model.py:load_pytorch`` +
+        ``policy_config``）：构建 ``PI0Pytorch`` → ``safetensors.torch.load_model``
+        加载（正确处理 tied weights）→ ``to_bfloat16_for_selected_params`` 做
+        选择性 bf16（vision patch embedding / layernorm / final norm 保持 fp32，
+        其余 bf16），这样 ~3.6B 参数的模型才能放进 12GB 显存。
+
+        支持 ``.safetensors``（save_model 导出）与 ``.pt``/``.pth``。加载失败时
+        回退到参考模型并告警，保证流水线不硬失败。
         """
         try:
             from openpi.models.pi0_config import Pi0Config
@@ -92,9 +97,11 @@ class Pi05Adapter(ModelAdapter):
                 action_expert_variant=self.config.action_expert_variant,
                 pytorch_compile_mode=None,
             )
+            # 先在 CPU 上构建并加载，做完精度转换后再搬到目标设备，避免 fp32 整模型占满显存。
             model = PI0Pytorch(pi0_cfg)
             if self.config.checkpoint:
-                self._load_checkpoint(model, self.config.checkpoint, device)
+                self._load_checkpoint(model, self.config.checkpoint)
+            self._apply_precision(model)
             self._is_real_openpi = True
             return model.to(device).eval()
         except Exception as exc:  # noqa: BLE001 - graceful MVP fallback
@@ -106,22 +113,39 @@ class Pi05Adapter(ModelAdapter):
             return Pi05ReferenceModel(self.config).to(device).eval()
 
     @staticmethod
-    def _load_checkpoint(model, checkpoint: str, device: str) -> None:
+    def _load_checkpoint(model, checkpoint: str) -> None:
+        """在 CPU 上把权重加载进 model（就地）。"""
         if checkpoint.endswith(".safetensors"):
-            from safetensors.torch import load_file
+            # 优先用 safetensors.torch.load_model（与 openpi save_model 配对，处理 tied weights）。
+            try:
+                from safetensors.torch import load_model
 
-            state = load_file(checkpoint, device=device)
+                missing, unexpected = load_model(model, checkpoint, strict=False)
+            except Exception:  # noqa: BLE001 - 退回到裸 state_dict 加载
+                from safetensors.torch import load_file
+
+                state = load_file(checkpoint)
+                missing, unexpected = model.load_state_dict(state, strict=False)
         else:
-            state = torch.load(checkpoint, map_location=device)
+            state = torch.load(checkpoint, map_location="cpu")
             if isinstance(state, dict) and "model" in state and isinstance(state["model"], dict):
                 state = state["model"]
-        missing, unexpected = model.load_state_dict(state, strict=False)
+            missing, unexpected = model.load_state_dict(state, strict=False)
         logger.info(
             "Loaded checkpoint %s (missing=%d, unexpected=%d keys)",
             checkpoint,
             len(missing),
             len(unexpected),
         )
+
+    def _apply_precision(self, model) -> None:
+        """对齐 openpi：对 paligemma_with_expert 做选择性 bf16 / fp32。"""
+        target = getattr(model, "paligemma_with_expert", None)
+        cast = getattr(target, "to_bfloat16_for_selected_params", None)
+        if cast is not None:
+            cast(self.config.precision)
+        elif self.config.precision == "bfloat16":
+            model.to(dtype=torch.bfloat16)
 
     def stage_module(self, stage: str):
         if self.model is None:
@@ -140,6 +164,41 @@ class Pi05Adapter(ModelAdapter):
     def time_embed_dim(self) -> int:
         """Dimension of the sinusoidal time embedding fed to the action expert."""
         return int(self.config.expert_width)
+
+    @property
+    def orchestrator_key(self) -> str | None:
+        # 真实 openpi 模型走 sample_actions 端到端路径；参考模型用三段式默认编排器。
+        return "pi05_real" if self._is_real_openpi else None
+
+    # pi05 真实模型预处理需要的相机视图键（见 openpi preprocessing_pytorch.IMAGE_KEYS）。
+    _OPENPI_IMAGE_KEYS = ("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb")
+
+    def to_openpi_observation(self, observation: dict[str, Any], device: str):
+        """把简单 observation dict 转为真实 openpi ``Observation``（冒烟测试用）。
+
+        简单 obs 仅含单张 image + lang_tokens + state。这里把该图复制到 pi05
+        预处理要求的三个相机视图，并合成全有效掩码与 prompt mask。
+        （pi05 的 action 后缀不使用 state，仅其 batch 维参与计算。）
+        """
+        from openpi.models.model import Observation  # 延迟导入，避免无 openpi 环境报错
+
+        images = observation["images"].to(device)
+        lang_tokens = observation["lang_tokens"].to(device)
+        state = observation["state"].to(device)
+        bsize = state.shape[0]
+
+        image_dict = {k: images for k in self._OPENPI_IMAGE_KEYS}
+        mask = torch.ones(bsize, dtype=torch.bool, device=device)
+        mask_dict = {k: mask for k in self._OPENPI_IMAGE_KEYS}
+
+        data = {
+            "image": image_dict,
+            "image_mask": mask_dict,
+            "state": state,
+            "tokenized_prompt": lang_tokens,
+            "tokenized_prompt_mask": torch.ones_like(lang_tokens, dtype=torch.bool),
+        }
+        return Observation.from_dict(data)
 
     def example_observation(self, batch_size: int = 1, device: str = "cpu") -> dict[str, Any]:
         cfg = self.config

@@ -10,9 +10,18 @@
 
 from chameleon.config.schema import (
     CompileStep,
+    DeployConfig,
+    ExportStep,
     InferConfig,
     QuantizeStep,
     TaskConfig,
 )
 
-__all__ = ["TaskConfig", "QuantizeStep", "CompileStep", "InferConfig"]
+__all__ = [
+    "TaskConfig",
+    "QuantizeStep",
+    "ExportStep",
+    "DeployConfig",
+    "CompileStep",
+    "InferConfig",
+]

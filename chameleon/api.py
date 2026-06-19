@@ -84,6 +84,86 @@ def run_infer(
     return session.infer(observation)
 
 
+def run_eval(task: TaskConfig):
+    """在真实 LeRobot 数据上评测 pi05：逐帧对比预测动作与 ground-truth。
+
+    通过 ``evaluate.policy_runner`` 选择后端（``openpi`` / ``chameleon``），
+    复用 dataloader + PolicyRunner registry。
+    ``evaluate.viewer`` 为 ``webui`` / ``both`` 时启动 WebSocket 服务，
+    推理线程仅非阻塞投递事件，JPEG 编码在 asyncio 消费侧完成。
+    """
+    from chameleon.evaluate.task_utils import sync_eval_num_samples
+
+    sync_eval_num_samples(task)
+
+    viewer = (task.evaluate.viewer or "console").strip().lower()
+    if viewer in ("webui", "both"):
+        from chameleon.evaluate.viewers.webui.server import run_eval_webui
+
+        return run_eval_webui(task)
+
+    from chameleon.dataloader import build_dataset_from_config
+    from chameleon.evaluate import evaluate_lerobot
+    from chameleon.evaluate.runner_base import build_policy_runner
+    from chameleon.evaluate.viewers.base import build_eval_viewer
+
+    data_cfg = task.data
+    if not getattr(data_cfg, "dataset", None):
+        raise ValueError("eval 需要 task.data.dataset（如 pi05_libero）。")
+
+    data_source = build_dataset_from_config(data_cfg)
+    data_source.build()
+    runner = build_policy_runner(task)
+
+    repo_id = data_cfg.repo_id or getattr(data_source, "repo_id", "") or ""
+    action_horizon = int(getattr(data_source, "action_horizon", 10) or 10)
+    action_dim = int(getattr(data_source, "action_dim", 7) or 7)
+    start_index = int(getattr(data_cfg, "start_index", 0) or 0)
+    num_samples = int(task.evaluate.num_samples)
+
+    import uuid
+
+    run_id = uuid.uuid4().hex[:12]
+    meta = {
+        "type": "meta",
+        "run_id": run_id,
+        "repo_id": repo_id,
+        "backend": task.evaluate.policy_runner,
+        "compare_mode": False,
+        "action_horizon": action_horizon,
+        "action_dim": action_dim,
+        "start_index": start_index,
+        "end_index_exclusive": start_index + num_samples,
+    }
+    sink = build_eval_viewer(
+        task,
+        run_id=run_id,
+        repo_id=repo_id,
+        action_horizon=action_horizon,
+        action_dim=action_dim,
+        num_samples=num_samples,
+        start_index=start_index,
+    )
+
+    return evaluate_lerobot(
+        data_source,
+        runner,
+        num_samples=num_samples,
+        stride=task.evaluate.stride,
+        compare_horizon=task.evaluate.compare_horizon,
+        event_sink=sink,
+        run_meta=meta,
+        run_id=run_id,
+    )
+
+
+def get_dataset_openpi_config(dataset_name: str) -> str:
+    """从数据集 spec 取 openpi config 名（dataloader registry）。"""
+    from chameleon.dataloader import get_dataset_spec
+
+    return get_dataset_spec(dataset_name).openpi_config
+
+
 def run_quantize(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> None:
     platform = get_platform(task.platform)
     device = getattr(adapter, "_device", "cpu")
@@ -111,6 +191,42 @@ def run_quantize(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) ->
             )
         )
         logger.info("Quantized stage %s with %s -> %s", step.stage, step.method, meta.component_dtypes)
+
+
+def run_export(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
+    """Export ONNX graphs for deployment.
+
+    ``deploy.backend=pi05`` uses Chameleon built-in pi05 stage exporters.
+    """
+    from chameleon.deploy.backends import is_pi05_deploy_backend
+
+    backend = (task.deploy.backend or "reference").strip().lower()
+    if is_pi05_deploy_backend(backend):
+        from chameleon.deploy.pi05_openpi import run_pi05_export
+
+        return run_pi05_export(task, manifest)
+    if backend == "reference":
+        raise NotImplementedError(
+            "reference export is handled inside run_compile (capture -> ONNX). "
+            "Use actions: [compile] with deploy.backend=reference, or set "
+            "deploy.backend=pi05 for real pi05 ONNX export."
+        )
+    raise ValueError(f"Unknown deploy.backend {backend!r}.")
+
+
+def run_deploy_build(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
+    """Build TRT engines from exported ONNX (pi05 deploy path)."""
+    from chameleon.deploy.backends import is_pi05_deploy_backend
+
+    backend = (task.deploy.backend or "reference").strip().lower()
+    if is_pi05_deploy_backend(backend):
+        from chameleon.deploy.pi05_openpi import run_pi05_build
+
+        return run_pi05_build(task, manifest)
+    raise ValueError(
+        f"run_deploy_build requires deploy.backend=pi05 (got {backend!r}). "
+        "Use run_compile for the reference adapter path."
+    )
 
 
 def run_compile(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> dict[str, Artifact]:

@@ -1,0 +1,66 @@
+# pi05 LIBERO — 真实 openpi 权重 → ONNX 导出 → TensorRT engine 构建。
+#
+# 依赖 openpi 环境（CUDA，用于 ONNX 导出）与 TensorRT（engine build）。
+#
+# 仅导出 ONNX：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli export \
+#       --config configs/pi05_libero_trt_deploy.yaml --dry-run
+#
+# 导出 + build（需 TensorRT + GPU）：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli workflow \
+#       --config configs/pi05_libero_trt_deploy.yaml
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_libero_trt
+
+actions:
+  - export
+  - compile
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_trt/onnx
+  engine_dir: output/pi05_libero_trt/engines
+  use_cudagraph: false
+
+data:
+  openpi_config: pi05_libero
+
+export:
+  - stage: vit
+  - stage: llm
+  - stage: expert
+  - stage: denoise
+
+compile:
+  - stage: vit
+    options:
+      build_cfg: vit_build_cfg.py
+  - stage: llm
+    options:
+      build_cfg: llm_build_cfg.py
+  - stage: expert
+    options:
+      build_cfg: expert_build_cfg.py
+  - stage: denoise
+    options:
+      build_cfg: denoise_step_build_cfg.py
+
+infer:
+  batch_size: 1
+  num_steps: 10
+  use_compiled_engines: false
+  torch_device: cuda

@@ -103,6 +103,18 @@ def _register_builtin_platforms() -> None:
             aliases=("thor",),
         ),
         PlatformSpec(
+            name="nvidia_ada",
+            vendor="nvidia",
+            device="cuda",
+            dtypes=("fp32", "fp16", "int8", "fp8"),
+            compiler="tensorrt",
+            runtime="tensorrt",
+            kernel_tag="sm_89",
+            torch_device="cuda",
+            description="NVIDIA desktop Ada Lovelace (RTX 40 series, e.g. RTX 4070).",
+            aliases=("rtx4070", "rtx_4070", "ada", "sm_89"),
+        ),
+        PlatformSpec(
             name="intel_cpu",
             vendor="intel",
             device="cpu",

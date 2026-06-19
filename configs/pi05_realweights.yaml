@@ -3,10 +3,11 @@
 # Requires: the openpi runtime importable, transformers_replace installed, and a
 # checkpoint. Set use_reference=false and point checkpoint at a .pt/.pth/.safetensors.
 #
-# Status: real-weight LOADING + per-submodule quantize/compile are supported.
-# Driving the full real model through the simplified orchestrator additionally
-# needs KV-cache plumbing alignment with openpi sample_actions (bring-up TODO),
-# so this config defaults to quantize-only.
+# Status: real-weight LOADING + per-submodule quantize are supported, and real
+# end-to-end PyTorch inference now works via Pi05RealOrchestrator (it calls
+# PI0Pytorch.sample_actions directly; set actions to include `infer`). Compiling
+# the real model to a TRT engine (ONNX QDQ export) is still a bring-up TODO, so
+# `use_compiled_engines` must stay false for real weights.
 
 architecture: pi05
 model: pi05
