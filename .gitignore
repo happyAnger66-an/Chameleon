@@ -86,3 +86,4 @@ lib*.so
 *.nsys-rep
 *.qdrep
 models/
+output/

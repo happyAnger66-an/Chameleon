@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 
@@ -34,7 +33,7 @@ class Pi05VitExport(nn.Module):
         return cls(pwe.config, pwe.model.vision_tower, pwe.model.multi_modal_projector)
 
 
-def export_vit(pi05_model, export_dir: str | Path, *, dynamo: bool = True) -> Path:
+def export_vit(pi05_model, export_dir: str | Path, *, dynamo: bool = False) -> Path:
     export_dir = Path(export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)
     out_path = export_dir / "vit.onnx"
@@ -44,22 +43,25 @@ def export_vit(pi05_model, export_dir: str | Path, *, dynamo: bool = True) -> Pa
 
     start = time.time()
     logger.info("Exporting vit.onnx -> %s", out_path)
-    with torch.inference_mode():
-        with force_vision_eager_attention(model.vision_tower):
-            with sdp_math_backend_only():
-                torch.onnx.export(
-                    model,
-                    (pixel_values,),
-                    str(out_path),
-                    input_names=["pixel_values"],
-                    output_names=["image_features"],
-                    opset_version=19,
-                    dynamo=dynamo,
-                    do_constant_folding=True,
-                    dynamic_axes={
-                        "pixel_values": {0: "batch_size"},
-                        "image_features": {0: "batch_size"},
-                    },
-                )
+    try:
+        with torch.inference_mode():
+            with force_vision_eager_attention(model.vision_tower):
+                with sdp_math_backend_only():
+                    torch.onnx.export(
+                        model,
+                        (pixel_values,),
+                        str(out_path),
+                        input_names=["pixel_values"],
+                        output_names=["image_features"],
+                        opset_version=19,
+                        dynamo=dynamo,
+                        do_constant_folding=True,
+                        dynamic_axes={
+                            "pixel_values": {0: "batch_size"},
+                            "image_features": {0: "batch_size"},
+                        },
+                    )
+    finally:
+        del model, pixel_values
     logger.info("vit.onnx export done in %.1fs", time.time() - start)
     return out_path

@@ -48,16 +48,16 @@ export:
 compile:
   - stage: vit
     options:
-      build_cfg: vit_build_cfg.py
+      build_cfg: configs/build_configs/vit_build_cfg.py
   - stage: llm
     options:
-      build_cfg: llm_build_cfg.py
+      build_cfg: configs/build_configs/llm_build_cfg.py
   - stage: expert
     options:
-      build_cfg: expert_build_cfg.py
+      build_cfg: configs/build_configs/expert_build_cfg.py
   - stage: denoise
     options:
-      build_cfg: denoise_step_build_cfg.py
+      build_cfg: configs/build_configs/denoise_step_build_cfg.py
 
 infer:
   batch_size: 1

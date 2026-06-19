@@ -15,7 +15,7 @@ from chameleon.deploy.paths import (
     stage_engine_path,
     stage_onnx_path,
 )
-from chameleon.deploy.pi05.export import PI05_STAGES, export_stage
+from chameleon.deploy.pi05.export import PI05_STAGES, export_pi05_stages, export_stage
 from chameleon.deploy.trt_build import build_engine, validate_precision_matches_onnx
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ def export_pi05_stage(
     step: ExportStep,
     *,
     paths: DeployPaths | None = None,
+    pi05_model=None,
 ) -> str:
     paths = paths or resolve_deploy_paths(task)
     paths.export_dir.mkdir(parents=True, exist_ok=True)
@@ -40,11 +41,18 @@ def export_pi05_stage(
         paths.export_dir,
         paths.checkpoint_dir,
     )
+    if pi05_model is None:
+        from chameleon.deploy.pi05.loader import load_pi05_model
+
+        pi05_model = load_pi05_model(
+            str(paths.checkpoint_dir),
+            paths.train_config,
+            device="cpu",
+        )
     out = export_stage(
         step.stage,
-        checkpoint_dir=str(paths.checkpoint_dir),
+        pi05_model=pi05_model,
         export_dir=paths.export_dir,
-        train_config=paths.train_config,
         options=step.options,
     )
     onnx_path = Path(out)
@@ -99,24 +107,35 @@ def iter_export_steps(task: TaskConfig) -> list[ExportStep]:
 
 def run_pi05_export(task: TaskConfig, manifest) -> dict[str, Artifact]:
     paths = resolve_deploy_paths(task)
-    artifacts: dict[str, Artifact] = {}
-
-    for step in iter_export_steps(task):
+    steps = iter_export_steps(task)
+    for step in steps:
         if step.stage not in PI05_STAGES:
             raise ValueError(
                 f"Unknown export stage {step.stage!r}; expected one of {PI05_STAGES}."
             )
-        onnx_path = export_pi05_stage(task, step, paths=paths)
+
+    stage_options = {step.stage: dict(step.options) for step in steps}
+    exported = export_pi05_stages(
+        [step.stage for step in steps],
+        checkpoint_dir=str(paths.checkpoint_dir),
+        export_dir=paths.export_dir,
+        train_config=paths.train_config,
+        stage_options=stage_options,
+    )
+
+    artifacts: dict[str, Artifact] = {}
+    for stage, out_path in exported.items():
+        onnx_path = str(out_path)
         artifact = Artifact(
             kind="onnx",
-            stage=step.stage,
+            stage=stage,
             platform=task.platform,
             path=onnx_path,
             metadata={"backend": "pi05", "train_config": paths.train_config},
         )
         manifest.add(artifact)
-        artifacts[step.stage] = artifact
-        logger.info("Exported stage %s -> %s", step.stage, onnx_path)
+        artifacts[stage] = artifact
+        logger.info("Exported stage %s -> %s", stage, onnx_path)
 
     return artifacts
 

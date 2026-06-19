@@ -11,6 +11,7 @@ from chameleon.deploy.pi05.denoise import export_denoise
 from chameleon.deploy.pi05.expert import export_expert
 from chameleon.deploy.pi05.llm import export_llm
 from chameleon.deploy.pi05.loader import load_pi05_model
+from chameleon.deploy.pi05.memory import release_export_cuda_memory
 from chameleon.deploy.pi05.vit import export_vit
 
 logger = logging.getLogger(__name__)
@@ -28,9 +29,8 @@ _EXPORTERS: dict[str, Callable[..., Path]] = {
 def export_stage(
     stage: str,
     *,
-    checkpoint_dir: str,
+    pi05_model,
     export_dir: str | Path,
-    train_config: str | None = None,
     options: dict[str, Any] | None = None,
 ) -> Path:
     if stage == "embed_prefix":
@@ -41,6 +41,35 @@ def export_stage(
         raise KeyError(f"Unknown pi05 export stage {stage!r}; expected one of {PI05_STAGES}.")
 
     options = dict(options or {})
-    pi05_model = load_pi05_model(checkpoint_dir, train_config)
     exporter = _EXPORTERS[stage]
-    return exporter(pi05_model, export_dir, **options)
+    try:
+        return exporter(pi05_model, export_dir, **options)
+    finally:
+        release_export_cuda_memory(pi05_model)
+
+
+def export_pi05_stages(
+    stages: list[str],
+    *,
+    checkpoint_dir: str,
+    export_dir: str | Path,
+    train_config: str | None = None,
+    stage_options: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Path]:
+    """Load pi05 once on CPU, export each stage, release GPU memory between stages."""
+    pi05_model = load_pi05_model(checkpoint_dir, train_config, device="cpu")
+    results: dict[str, Path] = {}
+    try:
+        for stage in stages:
+            opts = dict((stage_options or {}).get(stage, {}))
+            logger.info("Export pipeline stage=%s", stage)
+            results[stage] = export_stage(
+                stage,
+                pi05_model=pi05_model,
+                export_dir=export_dir,
+                options=opts,
+            )
+    finally:
+        del pi05_model
+        release_export_cuda_memory()
+    return results

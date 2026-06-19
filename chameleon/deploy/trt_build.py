@@ -11,6 +11,11 @@ import onnx
 import tensorrt as trt
 from onnx import TensorProto
 
+from chameleon.compile.tensorrt.compat import (
+    apply_precision_constraints_policy,
+    set_builder_flag_if_present,
+)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -124,24 +129,24 @@ def apply_builder_precision_flags(config: trt.IBuilderConfig, precision_tokens: 
             print(colored(f"precision token {tok}: FP32 baseline (no extra BuilderFlag)", print_color))
             continue
         if tok == "fp16":
-            config.set_flag(trt.BuilderFlag.FP16)
-            logger.info("Enabled FP16 mode (BuilderFlag.FP16)")
-            print(colored("Enabled FP16 mode (BuilderFlag.FP16)", print_color))
+            if set_builder_flag_if_present(config, "FP16"):
+                logger.info("Enabled FP16 mode (BuilderFlag.FP16)")
+                print(colored("Enabled FP16 mode (BuilderFlag.FP16)", print_color))
             continue
         if tok == "bf16":
-            config.set_flag(trt.BuilderFlag.BF16)
-            logger.info("Enabled BF16 mode (BuilderFlag.BF16)")
-            print(colored("Enabled BF16 mode (BuilderFlag.BF16)", print_color))
+            if set_builder_flag_if_present(config, "BF16"):
+                logger.info("Enabled BF16 mode (BuilderFlag.BF16)")
+                print(colored("Enabled BF16 mode (BuilderFlag.BF16)", print_color))
             continue
         if tok == "fp8":
-            config.set_flag(trt.BuilderFlag.FP8)
-            logger.info("Enabled FP8 mode (BuilderFlag.FP8)")
-            print(colored("Enabled FP8 mode (BuilderFlag.FP8)", print_color))
+            if set_builder_flag_if_present(config, "FP8"):
+                logger.info("Enabled FP8 mode (BuilderFlag.FP8)")
+                print(colored("Enabled FP8 mode (BuilderFlag.FP8)", print_color))
             continue
         if tok in ("int4", "w4"):
-            config.set_flag(trt.BuilderFlag.INT4)
-            logger.info("Enabled INT4 mode (BuilderFlag.INT4)")
-            print(colored("Enabled INT4 mode (BuilderFlag.INT4)", print_color))
+            if set_builder_flag_if_present(config, "INT4"):
+                logger.info("Enabled INT4 mode (BuilderFlag.INT4)")
+                print(colored("Enabled INT4 mode (BuilderFlag.INT4)", print_color))
             continue
         unknown.append(tok)
 
@@ -341,13 +346,10 @@ def _load_trt_plugin_shared_libraries(
         ctypes.CDLL(ap, mode=ctypes.RTLD_GLOBAL)
 
 
-def _network_creation_flags(*, strongly_typed: bool) -> int:
-    flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-    if strongly_typed:
-        st_flag = getattr(trt.NetworkDefinitionCreationFlag, "STRONGLY_TYPED", None)
-        if st_flag is not None:
-            flags |= 1 << int(st_flag)
-    return flags
+def _network_creation_flags(*, strongly_typed: bool) -> int | None:
+    from chameleon.compile.tensorrt.compat import network_creation_flags
+
+    return network_creation_flags(strongly_typed=strongly_typed)
 
 
 def build_engine(
@@ -447,17 +449,11 @@ def build_engine(
     logger.info("\n[Step 1/5] Creating TensorRT builder...")
     print(colored("\n[Step 1/5] Creating TensorRT builder...", print_color))
     builder = trt.Builder(TRT_LOGGER)
-    net_flags = _network_creation_flags(strongly_typed=strongly_typed_network)
-    network = builder.create_network(net_flags)
-    if strongly_typed_network and getattr(
-        trt.NetworkDefinitionCreationFlag, "STRONGLY_TYPED", None
-    ) is not None:
-        logger.info("Network flags: EXPLICIT_BATCH | STRONGLY_TYPED")
-        print(colored("Network flags: EXPLICIT_BATCH | STRONGLY_TYPED", print_color))
-    elif strongly_typed_network:
-        logger.warning(
-            "STRONGLY_TYPED not available in this TensorRT build; using EXPLICIT_BATCH only"
-        )
+    from chameleon.compile.tensorrt.compat import create_onnx_network, describe_network_flags
+
+    network = create_onnx_network(builder, strongly_typed=strongly_typed_network)
+    logger.info("Network flags: %s", describe_network_flags(strongly_typed=strongly_typed_network))
+    print(colored(f"Network flags: {describe_network_flags(strongly_typed=strongly_typed_network)}", print_color))
     parser = trt.OnnxParser(network, TRT_LOGGER)
 
     # Parse ONNX model
@@ -582,9 +578,11 @@ def build_engine(
     config = builder.create_builder_config()
 
     if use_cudagraph:
-        config.set_flag(trt.BuilderFlag.CUDA_GRAPH)
-        logger.info("Enabled CUDA_GRAPH mode")
-        print(colored("Enabled CUDA_GRAPH mode", print_color))
+        if set_builder_flag_if_present(config, "CUDA_GRAPH"):
+            logger.info("Enabled CUDA_GRAPH mode")
+            print(colored("Enabled CUDA_GRAPH mode", print_color))
+        else:
+            logger.info("CUDA_GRAPH requested but BuilderFlag unavailable; continuing without it")
 
     # Enable detailed profiling for engine inspection
     # This allows get_layer_information() to return layer types, precisions, tactics, etc.
@@ -609,22 +607,7 @@ def build_engine(
             )
         )
     else:
-        # Precision constraint policy (useful when layer_precision_overrides is provided).
-        pol = str(precision_constraints or "").strip().lower()
-        if pol:
-            if pol == "obey":
-                config.set_flag(trt.BuilderFlag.OBEY_PRECISION_CONSTRAINTS)
-                logger.info("Enabled OBEY_PRECISION_CONSTRAINTS")
-                print(colored("Enabled OBEY_PRECISION_CONSTRAINTS", print_color))
-            elif pol == "prefer":
-                config.set_flag(trt.BuilderFlag.PREFER_PRECISION_CONSTRAINTS)
-                logger.info("Enabled PREFER_PRECISION_CONSTRAINTS")
-                print(colored("Enabled PREFER_PRECISION_CONSTRAINTS", print_color))
-            else:
-                raise ValueError(
-                    f"Unknown precision_constraints policy: {precision_constraints!r} "
-                    "(expected 'obey' or 'prefer')"
-                )
+        apply_precision_constraints_policy(config, precision_constraints, log=logger)
 
         tokens = normalize_precision_tokens(precision)
         if not tokens:

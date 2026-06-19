@@ -77,9 +77,9 @@ class TensorRTCompiler(CompilerBackend):
 
         trt_logger = trt.Logger(trt.Logger.WARNING)
         builder = trt.Builder(trt_logger)
-        network = builder.create_network(
-            1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-        )
+        from chameleon.compile.tensorrt.compat import create_onnx_network
+
+        network = create_onnx_network(builder, strongly_typed=False)
         parser = trt.OnnxParser(network, trt_logger)
         # parse_from_file (not parse(bytes)) so the parser can resolve any
         # external weight data files (``*.onnx.data``) next to the model.

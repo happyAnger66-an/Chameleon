@@ -56,7 +56,7 @@ def export_expert(
     pi05_model,
     export_dir: str | Path,
     *,
-    dynamo: bool = True,
+    dynamo: bool = False,
     export_dtype: torch.dtype = torch.bfloat16,
     prefix_len: int = 968,
     action_seq_len: int = 10,
@@ -91,39 +91,43 @@ def export_expert(
     past_values_tensor = torch.cat(past_values, dim=0)
 
     start = time.time()
-    logger.info("Exporting expert.onnx -> %s", out_path)
-    with torch.inference_mode():
-        torch.onnx.export(
-            model,
-            (
-                attention_mask,
-                position_ids,
-                inputs_embeds,
-                adarms_cond,
-                past_keys_tensor,
-                past_values_tensor,
-            ),
-            str(out_path),
-            input_names=[
-                "attention_mask",
-                "position_ids",
-                "inputs_embeds",
-                "adarms_cond",
-                "past_keys",
-                "past_values",
-            ],
-            output_names=["last_hidden_state"],
-            opset_version=19,
-            dynamo=dynamo,
-            do_constant_folding=True,
-            dynamic_axes={
-                "attention_mask": {0: "batch_size"},
-                "position_ids": {0: "batch_size"},
-                "inputs_embeds": {0: "batch_size"},
-                "adarms_cond": {0: "batch_size"},
-                "past_keys": {2: "llm_seq_len"},
-                "past_values": {2: "llm_seq_len"},
-            },
-        )
+    logger.info("Exporting expert.onnx -> %s (dynamo=%s)", out_path, dynamo)
+    try:
+        with torch.inference_mode():
+            torch.onnx.export(
+                model,
+                (
+                    attention_mask,
+                    position_ids,
+                    inputs_embeds,
+                    adarms_cond,
+                    past_keys_tensor,
+                    past_values_tensor,
+                ),
+                str(out_path),
+                input_names=[
+                    "attention_mask",
+                    "position_ids",
+                    "inputs_embeds",
+                    "adarms_cond",
+                    "past_keys",
+                    "past_values",
+                ],
+                output_names=["last_hidden_state"],
+                opset_version=19,
+                dynamo=dynamo,
+                do_constant_folding=True,
+                dynamic_axes={
+                    "attention_mask": {0: "batch_size"},
+                    "position_ids": {0: "batch_size"},
+                    "inputs_embeds": {0: "batch_size"},
+                    "adarms_cond": {0: "batch_size"},
+                    "past_keys": {2: "llm_seq_len"},
+                    "past_values": {2: "llm_seq_len"},
+                },
+            )
+    finally:
+        del model, attention_mask, position_ids, inputs_embeds, adarms_cond
+        del past_keys_tensor, past_values_tensor, past_keys, past_values
     logger.info("expert.onnx export done in %.1fs", time.time() - start)
     return out_path

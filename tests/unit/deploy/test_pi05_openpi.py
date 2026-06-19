@@ -31,13 +31,13 @@ def test_run_pi05_export_records_manifest(deploy_task: TaskConfig, tmp_path: Pat
     export_dir = Path(deploy_task.deploy.export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    def _fake_export(task, step, *, paths=None):
-        onnx = export_dir / f"{step.stage}.onnx"
-        onnx.write_bytes(b"onnx")
-        return str(onnx)
+    def _fake_export_stages(stages, **kwargs):
+        export_dir = Path(kwargs["export_dir"])
+        export_dir.mkdir(parents=True, exist_ok=True)
+        return {stage: export_dir / f"{stage}.onnx" for stage in stages}
 
     manifest = Manifest(deploy_task.output_dir)
-    with patch("chameleon.deploy.pi05_openpi.export_pi05_stage", side_effect=_fake_export):
+    with patch("chameleon.deploy.pi05_openpi.export_pi05_stages", side_effect=_fake_export_stages):
         artifacts = run_pi05_export(deploy_task, manifest)
 
     assert set(artifacts) == {"vit", "llm", "expert", "denoise"}
