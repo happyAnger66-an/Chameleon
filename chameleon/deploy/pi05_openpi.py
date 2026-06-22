@@ -25,6 +25,15 @@ PI05_OPENPI_STAGES = PI05_STAGES
 _DEFAULT_EXPORT_STAGES = ("vit", "llm", "expert", "denoise")
 
 
+def _tensorrt_version() -> str | None:
+    try:
+        import tensorrt as trt
+
+        return str(getattr(trt, "__version__", None) or "")
+    except ImportError:
+        return None
+
+
 def export_pi05_stage(
     task: TaskConfig,
     step: ExportStep,
@@ -168,6 +177,7 @@ def run_pi05_build(task: TaskConfig, manifest) -> dict[str, Artifact]:
             metadata={
                 "backend": "pi05",
                 "build_cfg": str(build_cfg or resolve_build_cfg_path(task, step.stage, paths)),
+                "tensorrt_version": _tensorrt_version(),
             },
         )
         manifest.add(artifact)

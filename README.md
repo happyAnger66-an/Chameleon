@@ -82,6 +82,8 @@ chameleon profile --config configs/pi05_cpu.yaml --runs 20
 # Estimate compute (MACs/FLOPs) and memory traffic for one full inference.
 chameleon stats --config configs/pi05_cpu.yaml
 chameleon stats --config configs/pi05_libero_trt_deploy.yaml --dry-run
+chameleon trt-profile --config configs/pi05_libero_trt_deploy.yaml --dry-run
+chameleon draw profile --config configs/pi05_libero_trt_deploy.yaml
 PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli stats \
   --config configs/pi05_libero_trt_deploy.yaml --format json --output output/stats.json
 ```

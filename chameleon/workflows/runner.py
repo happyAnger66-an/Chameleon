@@ -16,8 +16,17 @@ import logging
 
 import torch
 
-from chameleon.api import build_adapter, run_compile, run_deploy_build, run_export, run_infer, run_quantize
+from chameleon.api import (
+    build_adapter,
+    run_compile,
+    run_deploy_build,
+    run_export,
+    run_infer,
+    run_quantize,
+    run_trt_profile,
+)
 from chameleon.deploy.backends import is_pi05_deploy_backend
+from chameleon.deploy.trt_profile import iter_profile_steps
 from chameleon.config.schema import TaskConfig
 from chameleon.core.artifact import Artifact, Manifest
 
@@ -52,6 +61,17 @@ class WorkflowRunner:
             elif action == "compile":
                 for s in self.task.compile:
                     lines.append(f"  compile:  stage={s.stage} options={s.options}")
+            elif action == "trt_profile":
+                profile_dir = self.task.profile.profile_dir or f"{self.task.output_dir}/profiles"
+                for step in iter_profile_steps(self.task):
+                    lines.append(
+                        f"  trt_profile: stage={step.stage} -> "
+                        f"{profile_dir}/{step.stage}.profile.json"
+                    )
+                lines.append(
+                    f"  trt_profile viewer={self.task.profile.viewer} "
+                    f"iterations={self.task.profile.iterations}"
+                )
             elif action == "infer":
                 lines.append(
                     f"  infer:    batch={self.task.infer.batch_size} "
@@ -79,6 +99,8 @@ class WorkflowRunner:
                 else:
                     adapter = adapter or build_adapter(self.task)
                     compiled_engines = run_compile(self.task, adapter, self.manifest)
+            elif action == "trt_profile":
+                run_trt_profile(self.task, self.manifest)
             elif action == "infer":
                 adapter = adapter or build_adapter(self.task)
                 stage_artifacts, stage_runtimes = self._infer_engine_bindings(compiled_engines)

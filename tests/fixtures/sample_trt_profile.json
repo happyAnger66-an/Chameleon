@@ -1,0 +1,24 @@
+[
+  {"count": 20},
+  {
+    "name": "MatMul_0",
+    "timeMs": 12.5,
+    "averageMs": 0.625,
+    "medianMs": 0.61,
+    "percentage": 45.2
+  },
+  {
+    "name": "Softmax_1",
+    "timeMs": 8.1,
+    "averageMs": 0.405,
+    "medianMs": 0.40,
+    "percentage": 29.3
+  },
+  {
+    "name": "Add_2",
+    "timeMs": 7.0,
+    "averageMs": 0.35,
+    "medianMs": 0.34,
+    "percentage": 25.5
+  }
+]

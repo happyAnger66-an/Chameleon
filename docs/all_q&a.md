@@ -152,6 +152,36 @@ chameleon stats --config configs/pi05_libero_trt_deploy.yaml --measured --format
 
 **限制**：理论访存未建模 cache reuse / TRT fusion；Softmax/LayerNorm 等小算子可能漏计；`embed_prefix` 未纳入。
 
+### Q9：TRT layer profile（`trt_profile`）与 compile / stats 的区别
+
+**compile**：从 ONNX **构建** TensorRT engine（Python TensorRT API / `trt_build.py`）。
+
+**trt_profile**：对已有 `engines/{stage}.engine` 运行 **`trtexec --loadEngine --dumpProfile --exportProfile`**，产出各 layer 的 **实测 latency**（`profiles/{stage}.profile.json`），**不重建** engine。
+
+**stats**（§Q8）：PyTorch 路径上的 **理论** MACs/FLOPs 与访存近似；与 trtexec layer timing 互补。
+
+**形状 / plugin 对齐**：trtexec 的 `minShapes/optShapes/maxShapes` 与 `--plugins` 从各 stage 的 `configs/build_configs/*.py` 读取（与 compile 相同）。llm 若 build 时需要 AttentionPlugin，须在 `profile.plugin_lib_paths` 或 build_cfg 中配置相同 `.so` 路径。
+
+**WebUI**：
+
+| `profile.viewer` | 行为 |
+|------------------|------|
+| `static` | 写 `profiles/index.html` + `manifest.json` |
+| `webui` | 仅阻塞起本地 HTTP 服务 |
+| `both` | 先写静态文件，再起服务（workflow 末尾） |
+
+与 eval WebUI（LeRobot WebSocket 相机流）**独立**，不复用其协议。
+
+```bash
+chameleon trt-profile --config configs/pi05_libero_trt_deploy.yaml
+chameleon draw profile --config configs/pi05_libero_trt_deploy.yaml
+chameleon draw profile output/.../vit.profile.json
+```
+
+**相关文件**：`chameleon/deploy/trt_profile.py`；`chameleon/draw/trt_profile_viewer.py`；`chameleon/commands/trt_profile.py`、`draw.py`
+
+**限制**：需 `trtexec` 在 PATH；大 engine profile 可能数分钟；`denoise` 已含 expert，yaml 可只 profile vit/llm/denoise。
+
 ---
 
 ## 文档维护约定

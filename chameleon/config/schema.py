@@ -76,6 +76,38 @@ class CompileStep(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class TrtProfileStep(BaseModel):
+    """单 stage TRT engine layer profiling（trtexec --loadEngine）。"""
+
+    stage: str
+    options: dict[str, Any] = Field(default_factory=dict)
+    """Per-stage overrides: iterations, skip, trtexec_extra_args, fail_fast."""
+
+
+class TrtProfileConfig(BaseModel):
+    """trtexec layer profile 全局配置（``actions`` 含 ``trt_profile`` 时使用）。"""
+
+    profile_dir: str | None = None
+    """Profile JSON 输出目录；缺省 ``{output_dir}/profiles``。"""
+
+    iterations: int = 20
+    warmup: int = 200
+    separate_profile_run: bool = True
+    profiling_verbosity: str = "detailed"
+    export_layer_info: bool = False
+    export_times: bool = False
+    viewer: str = "static"
+    """``static`` | ``webui`` | ``both`` — 静态 HTML / 阻塞 HTTP 服务 / 两者。"""
+    webui_host: str = "127.0.0.1"
+    webui_port: int = 8770
+    open_browser: bool = True
+    plugin_lib_paths: list[str] = Field(default_factory=list)
+    trtexec_path: str | None = None
+    """``trtexec`` 可执行文件；须与 compile 时 TensorRT 版本一致（缺省 PATH 中 ``trtexec``）。"""
+    fail_fast: bool = False
+    timeout_sec: int = 1800
+
+
 class InferConfig(BaseModel):
     batch_size: int = 1
     num_steps: int | None = None
@@ -185,7 +217,7 @@ class TaskConfig(BaseModel):
     output_dir: str = "output/chameleon_run"
 
     actions: list[str] = Field(default_factory=lambda: ["infer"])
-    """Ordered subset of ``quantize | compile | infer``."""
+    """Ordered subset of ``quantize | export | compile | trt_profile | infer``."""
 
     model_overrides: dict[str, Any] = Field(default_factory=dict)
     """Overrides applied to the model adapter config (e.g. action_dim)."""
@@ -199,6 +231,10 @@ class TaskConfig(BaseModel):
     deploy: DeployConfig = Field(default_factory=DeployConfig)
     """TRT 部署（真实 pi05 ONNX 导出 + engine build）。"""
     compile: list[CompileStep] = Field(default_factory=list)
+    trt_profile: list[TrtProfileStep] = Field(default_factory=list)
+    """TRT engine layer profile 步骤；``actions`` 含 ``trt_profile`` 时执行。"""
+    profile: TrtProfileConfig = Field(default_factory=TrtProfileConfig)
+    """trtexec --dumpProfile / WebUI 配置。"""
     infer: InferConfig = Field(default_factory=InferConfig)
     data: DataConfig = Field(default_factory=DataConfig)
     """Real-dataset config consumed by the dataloader / evaluate paths."""

@@ -229,6 +229,13 @@ def run_deploy_build(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact
     )
 
 
+def run_trt_profile(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
+    """Profile compiled TRT engines with trtexec and write/serve layer profile WebUI."""
+    from chameleon.deploy.trt_profile import run_trt_profile as _run
+
+    return _run(task, manifest)
+
+
 def run_compile(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> dict[str, Artifact]:
     """Compile each stage; returns the successfully built engine artifacts by stage."""
     from chameleon.compile.base import get_compiler

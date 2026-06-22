@@ -25,6 +25,8 @@ USAGE = (
     + "|   chameleon export  --config <yaml>                            |\n"
     + "|   chameleon quantize --config <yaml>                           |\n"
     + "|   chameleon compile  --config <yaml>                           |\n"
+    + "|   chameleon trt-profile --config <yaml>                        |\n"
+    + "|   chameleon draw profile <file.json> [--config <yaml>]         |\n"
     + "|   chameleon workflow --config <yaml>                           |\n"
     + "|   chameleon profile  --config <yaml>                           |\n"
     + "|   chameleon stats    --config <yaml>                           |\n"
@@ -35,6 +37,7 @@ USAGE = (
 
 def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
     from chameleon.commands.compile import compile_cli
+    from chameleon.commands.draw import draw_cli
     from chameleon.commands.eval import eval_cli
     from chameleon.commands.export import export_cli
     from chameleon.commands.info import architectures_cli, info_cli, platforms_cli
@@ -42,6 +45,7 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
     from chameleon.commands.profile import profile_cli
     from chameleon.commands.quantize import quantize_cli
     from chameleon.commands.stats import stats_cli
+    from chameleon.commands.trt_profile import trt_profile_cli
     from chameleon.commands.workflow import workflow_cli
 
     return {
@@ -53,6 +57,8 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
         "export": export_cli,
         "quantize": quantize_cli,
         "compile": compile_cli,
+        "draw": draw_cli,
+        "trt-profile": trt_profile_cli,
         "workflow": workflow_cli,
         "profile": profile_cli,
         "stats": stats_cli,

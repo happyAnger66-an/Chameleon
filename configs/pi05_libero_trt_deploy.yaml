@@ -18,6 +18,21 @@ output_dir: output/pi05_libero_trt
 actions:
   - export
   - compile
+  - trt_profile
+
+trt_profile:
+#  - stage: vit
+  - stage: llm
+  - stage: expert
+  - stage: denoise
+
+profile:
+  profile_dir: output/pi05_libero_trt/profiles
+  iterations: 50
+  viewer: both
+  webui_port: 8770
+  # compile 若用 openpi venv（tensorrt 11.x），trtexec 也须同版本，不能默认 /usr/bin/trtexec（10.x）：
+  # trtexec_path: /path/to/TensorRT-11.x/bin/trtexec
 
 model_overrides:
   use_reference: false

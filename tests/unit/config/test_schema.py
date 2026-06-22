@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from chameleon.config.schema import DeployConfig, EvaluateConfig, ExportStep, TaskConfig
+from chameleon.config.schema import DeployConfig, EvaluateConfig, ExportStep, TaskConfig, TrtProfileConfig
 
 
 def test_evaluate_defaults() -> None:
@@ -20,6 +20,20 @@ def test_deploy_defaults() -> None:
     deploy = DeployConfig()
     assert deploy.backend == "reference"
     assert deploy.use_cudagraph is False
+
+
+def test_trt_profile_defaults() -> None:
+    cfg = TrtProfileConfig()
+    assert cfg.viewer == "static"
+    assert cfg.iterations == 20
+    assert cfg.webui_port == 8770
+
+
+def test_load_deploy_yaml_has_trt_profile(task_deploy_yaml: Path) -> None:
+    task = TaskConfig.load(task_deploy_yaml)
+    assert "trt_profile" in task.actions
+    assert task.profile.viewer == "both"
+    assert len(task.trt_profile) == 4
 
 
 def test_export_step_roundtrip() -> None:

@@ -8,6 +8,18 @@
 		},
 		{
 			"path": "../starVLA"
+		},
+		{
+			"path": "../../TensorRT-LLM"
+		},
+		{
+			"path": "../../../nio/nio/tvm"
+		},
+		{
+			"path": "../../../nio/nio/hipp"
+		},
+		{
+			"path": "../../../nio/nio/compiler_runtime"
 		}
 	],
 	"settings": {}

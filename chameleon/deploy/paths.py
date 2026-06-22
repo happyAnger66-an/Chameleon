@@ -131,3 +131,25 @@ def stage_engine_path(paths: DeployPaths, stage: str) -> Path:
     if not name:
         raise KeyError(f"Unknown pi05 stage {stage!r}.")
     return paths.engine_dir / name
+
+
+def stage_profile_path(profile_dir: Path, stage: str) -> Path:
+    return profile_dir / f"{stage}.profile.json"
+
+
+def stage_profile_log_path(profile_dir: Path, stage: str) -> Path:
+    return profile_dir / f"{stage}.trtexec.log"
+
+
+def stage_layer_info_path(profile_dir: Path, stage: str) -> Path:
+    return profile_dir / f"{stage}.layer_info.json"
+
+
+def stage_times_path(profile_dir: Path, stage: str) -> Path:
+    return profile_dir / f"{stage}.times.json"
+
+
+def resolve_profile_dir(task: TaskConfig) -> Path:
+    if task.profile.profile_dir:
+        return Path(task.profile.profile_dir).expanduser().resolve()
+    return (Path(task.output_dir).expanduser().resolve() / "profiles")
