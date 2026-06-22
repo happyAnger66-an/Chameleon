@@ -1138,7 +1138,7 @@ flowchart TB
     subgraph llm ["VLM 推理"]
         D[runBaseModelPrefill<br/>写 Linear KV]
         E[Decode loop<br/>VanillaDecoder]
-        E1[Alpamayo 停止: traj_future_start 前停]
+        E1[Alpamayo 停止: traj_future 段前]
     end
 
     subgraph act ["Action Head"]
@@ -1192,19 +1192,98 @@ flowchart TB
 
 ### 5.6 阶段三：LLM Decode（VLA 特化停止）
 
-Decode 经 `VanillaDecoder::decodeStep()`：每步 `inputsEmbeds [BS,1,H]` → engine → 采样 1 token → KV `+1`。
+Decode 经 `VanillaDecoder::decodeStep()`：每步 `inputsEmbeds [BS,1,H]` → engine → 采样 1 token → append 到 `tokenIds` → `commitSequenceLength(+1)` 写 KV。
 
-**Alpamayo 特化停止条件**（非 EOS）：当已生成 token 的 **倒数第二个** 为 `<|traj_future_start|>` 时结束 decode——保证 CoT 文本完整，且 KV 停在 action head 需要的上下文边界：
+#### 5.6.1 Alpamayo 序列里各段 token 干什么？
+
+Alpamayo 在 Qwen3-VL 词表上扩展了 **轨迹专用 special token**（export 时 `checkpoint_utils.py` 加入）：
+
+| Token | 作用 |
+|-------|------|
+| `<\|traj_history_start\|>` … `<\|traj_history_end\|>` | **输入**：历史 egomotion，runtime 把 `<\|traj_history\|>` pad 换成离散 `<i0>`…`<i767>` |
+| `<\|cot_start\|>` | **生成起点**：export 时在 generation prompt 末尾自动追加（`chat_template.py`） |
+| （CoT 正文） | VLM **自回归生成**的 Chain-of-Causation 推理文本 |
+| `<\|cot_end\|>` | CoT 段结束标记 |
+| `<\|meta_action_start\|>` … `<\|meta_action_end\|>` | 可选 meta-action 段（训练格式中存在） |
+| `<\|traj_future_start\|>` | **未来轨迹段起点**——LM 训练序列与 action expert 的分界 |
+| `<\|traj_future_pre_tkn\|>` | future 段前缀 token（训练格式中紧跟 `traj_future_start`） |
+| `<\|traj_future\|>` × 64 | 训练时 LM 用离散 token 表示未来轨迹；**推理时由 action expert 扩散去噪替代** |
+| `<\|traj_future_end\|>` | future 段结束 |
+
+官方 Alpamayo 推理（PyTorch）也是 **VLM rollout 生成 CoT → 抽出 KV cache → action expert 做 flow-matching**；future 的 64 个 waypoint **不由 VLM 逐步自回归生成**。
+
+#### 5.6.2 精确停止条件（代码语义）
+
+每轮 decode 顺序：`decodeStep()`（采样并 **append** 新 token）→ `updateFinishStates()`。
 
 ```cpp
-// llmInferenceRuntime.cpp — updateFinishStates 内
+// llmInferenceRuntime.cpp — 当 action runner 为 ALPAMAYO1 时，不用 EOS 判定结束
 if (context.tokenIds[i].size() > 1
     && context.tokenIds[i][context.tokenIds[i].size() - 2] == trajFutureStartId) {
-    context.finishedStates[i] = 1;  // 停在 traj_future_start 之前
+    context.finishedStates[i] = 1;  // trajFutureStartId = <|traj_future_start|>
 }
 ```
 
-**Decode 侧优化**：
+设 `tokenIds = [..., A, <|traj_future_start|>, B]`（`B` 为 **刚采样到的最后一个 token**）时触发停止。
+
+含义：
+
+- **已写入 KV**：prefill 全段 + CoT 生成段 + `<|traj_future_start|>` + **`B`（通常为 `<|traj_future_pre_tkn|>`）**
+- **尚未生成**：64 个 `<|traj_future|>` 离散轨迹 token 及 `<|traj_future_end|>`
+
+注意：不是「见到 `<|traj_future_start|>` 就停」，而是 **多生成 1 个结构 token 后停**——与 PyTorch 侧 VLM 停止时 KV 长度对齐。
+
+#### 5.6.3 为什么不靠 EOS？
+
+| 若用 EOS | 问题 |
+|----------|------|
+| 标准 chat EOS（如 ``） | Alpamayo CoT/future 段用 **专用 delimiter**，generation 结束点不是 chat EOS |
+| 不设停止、一直 decode | 模型会按训练格式继续吐 **64 个 `<\|traj_future\|>`** + `traj_future_end`——与 action expert **重复且表示不同**（离散 LM token vs 连续 flow-matching） |
+| 在 `<\|cot_end\|>` 停 | 可能缺少 `traj_future_start` / `pre_tkn` 等结构 token，**KV 长度与 action head 训练时不一致** |
+
+因此 Edge-LLM 对 Alpamayo **禁用 EOS 结束路径**，改用 `traj_future_start` 边界检测（仅当 `mActionRunner` 为 `ALPAMAYO1` 时）。
+
+#### 5.6.4 「CoT 完整」指什么？
+
+- **Prefill** 结束于 `<\|cot_start\|>`（generation prompt 注入）。
+- **Decode** 自回归生成 CoT 正文直至模型学到 emit `<\|cot_end\|>`，再继续 meta / future 结构 token。
+- 停止点在 **future 离散轨迹 token 开始之前**，因此正常收敛时 **CoT 段（`cot_start`…`cot_end`）已完整生成**。
+- 用户可见文本：`tokenizer.decode(outputIds, skipSpecial=true)`，`output_text` 主要为 CoT 推理（special token 被跳过）。
+
+若采样中途偏离训练分布、未生成 `cot_end` 就触达 future 边界，CoT 可能不完整——这是 **模型采样问题**，不是停止逻辑本身的目标。
+
+#### 5.6.5 「KV 停在 action head 边界」指什么？
+
+Action expert（`sampleTrajectory`）**不再跑 VLM**，而是：
+
+1. 读取 `HybridCacheManager` 里 **已 commit 的 KV 长度** `kvLen`；
+2. 逐层 D2D 拷贝 VLM combined KV → action engine 分离 K/V；
+3. 64 个 diffusion waypoint 作为 **新 query**，对 `[0, kvLen)` 做 **cross-attention**（非因果，读全长 prefix KV）；
+4. MRoPE 起点：`basePos = vlmRopeDelta + kvLen`（waypoint 接在 VLM 序列之后）。
+
+```text
+KV cache 时间线：
+
+[Prefill]  image + text + traj_history  →  KV 写入
+[Decode]   cot 文本 + 结构 token       →  KV 逐步 +1
+[Stop]     含 traj_future_start + pre_tkn，不含 64×traj_future
+           kvLen ────────────────────────────────┐
+                                                ▼
+[Action]   10× flow-matching；waypoint 位置从 kvLen 起算
+```
+
+若 KV **过长**（生成了 64 个 LM traj token）：action 读到的上下文与训练不一致，attention mask / 位置编码错位。  
+若 KV **过短**（在 `cot_end` 就停）：缺少 future 段结构 token，同样与 PyTorch reference 不对齐。
+
+#### 5.6.6 与 PyTorch `sample_trajectories_from_data_with_vlm_rollout` 的对应
+
+| PyTorch | Edge-LLM C++ |
+|---------|--------------|
+| `vlm.generate(..., stopping_criteria=...)` 在 future 轨迹 LM 段之前停 | `updateFinishStates` 检测 `traj_future_start` 边界 |
+| 取出 `past_key_values` / prompt cache | `HybridCacheManager` + `getSeparateKVCacheForDecoderLayer` |
+| `expert(..., past_key_values=prompt_cache)` 64 步扩散 | `Alpamayo1ActionRunner::sampleTrajectory` 10× `enqueueV3` |
+
+**Decode 侧通用优化**：
 
 | 优化 | 说明 |
 |------|------|
@@ -1244,7 +1323,7 @@ mActionRunner->sampleTrajectory(stream, activeBatchSize, kvcache, ropeDeltas);
 | Engine 数 | 1–2 | **3**（llm + visual + action） |
 | 输入 | text / image / audio | + **past trajectory** |
 | 预处理 | vision/audio runner | + **轨迹 token 替换 + 噪声 init** |
-| Decode 停止 | EOS / max_length / stop_strings | + **`<|traj_future_start|>` 前停** |
+| Decode 停止 | EOS / max_length / stop_strings | + **`traj_future_start` 边界**（含其后 1 结构 token，不含 64×`traj_future`） |
 | Decode 之后 | 结束 | + **`sampleTrajectory`** |
 | KV cache | 仅服务 LLM | **LLM 写 → Action 读**（layout 转换） |
 | MRoPE | ViT + LLM | **Action 延续 VLM rope delta** |
