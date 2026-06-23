@@ -24,13 +24,13 @@ import torch
 
 from chameleon.dataloader.lerobot import LeRobotDataSource
 from chameleon.evaluate.compare import ActionDiff, compare_actions
-from chameleon.evaluate.runner_base import PolicyRunner
+from chameleon.evaluate.metrics import attach_pt_trt_pair_metrics, metrics_pt_vs_gt, step_metrics
+from chameleon.evaluate.runner_base import PolicyRunner, SupportsDualInfer, SupportsFixedNoise
 from chameleon.evaluate.running_stats import RunningDimDiffStats
 from chameleon.evaluate.viewers.base import (
     EvalEventSink,
     EvalStepEvent,
     NullEventSink,
-    row_step_metrics,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,16 +122,32 @@ def _emit_step_events(
     observation: dict[str, Any],
     infer_ms: float,
     running: RunningDimDiffStats | None = None,
+    pred_trt_h: np.ndarray | None = None,
 ) -> None:
     ah = int(pred_h.shape[0])
     ep = int(episode_id) if episode_id is not None else 0
     for k in range(ah):
         gt_row = gt_h[k]
         pred_row = pred_h[k]
-        metrics = row_step_metrics(gt_row, pred_row)
+        pred_trt_row = pred_trt_h[k] if pred_trt_h is not None and k < pred_trt_h.shape[0] else None
+        if pred_trt_row is not None:
+            metrics = metrics_pt_vs_gt(pred_row - gt_row)
+            metrics = attach_pt_trt_pair_metrics(
+                metrics,
+                pred_pt_row=pred_row,
+                pred_trt_row=pred_trt_row,
+                gt_row=gt_row,
+            )
+        else:
+            metrics = step_metrics(gt_row, pred_row)
         if running is not None:
             running.update(gt_row, pred_row)
             metrics = {**metrics, **running.metrics_payload()}
+        pred_trt_list = (
+            [float(x) for x in pred_trt_row.astype(np.float64).tolist()]
+            if pred_trt_row is not None
+            else None
+        )
         sink.on_step(
             EvalStepEvent(
                 run_id=run_id,
@@ -143,6 +159,7 @@ def _emit_step_events(
                 prompt=prompt if k == 0 else None,
                 gt_action=[float(x) for x in gt_row.astype(np.float64).tolist()],
                 pred_action=[float(x) for x in pred_row.astype(np.float64).tolist()],
+                pred_action_trt=pred_trt_list,
                 metrics=metrics,
                 observation=observation if k == 0 else None,
                 infer_ms=float(infer_ms) if k == 0 else None,
@@ -207,10 +224,20 @@ def evaluate_lerobot(
     for i in indices:
         sample = data_source[i]
         t0 = time.perf_counter()
-        pred = policy_runner.infer(sample.observation)
+        infer_dual = policy_runner.infer_dual if isinstance(policy_runner, SupportsDualInfer) else None
+        pred_trt: np.ndarray | None = None
+        noise_fn = policy_runner.noise_for_sample if isinstance(policy_runner, SupportsFixedNoise) else None
+        flow_noise = noise_fn(sample.index) if noise_fn is not None else None
+        if infer_dual is not None:
+            pred, pred_trt = infer_dual(sample.observation, sample_index=sample.index)
+        else:
+            pred = policy_runner.infer(sample.observation, noise=flow_noise)
         infer_ms = (time.perf_counter() - t0) * 1000.0
         pred_a, gt_a = _align_horizon(pred, sample.actions_gt, compare_horizon)
         diff = compare_actions(torch.from_numpy(gt_a), torch.from_numpy(pred_a))
+        pred_trt_a = None
+        if pred_trt is not None:
+            pred_trt_a, _ = _align_horizon(pred_trt, sample.actions_gt, compare_horizon)
 
         ep_for_ui = chunk_eligible(data_source, sample.index)
         if ep_for_ui is not None:
@@ -225,6 +252,7 @@ def evaluate_lerobot(
                 observation=sample.observation,
                 infer_ms=infer_ms,
                 running=ui_running,
+                pred_trt_h=pred_trt_a,
             )
 
         sum_max_abs += diff.max_abs

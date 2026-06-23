@@ -13,12 +13,32 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
 from chameleon.config.schema import TaskConfig
 from chameleon.core.registry import Registry
+
+
+@runtime_checkable
+class SupportsDualInfer(Protocol):
+    """双路推理：PyTorch + TRT 并行输出。"""
+
+    def infer_dual(
+        self,
+        observation: dict[str, Any],
+        *,
+        sample_index: int = 0,
+        noise: np.ndarray | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]: ...
+
+
+@runtime_checkable
+class SupportsFixedNoise(Protocol):
+    """固定 flow-matching 噪声（``noise=fixed`` 评测）。"""
+
+    def noise_for_sample(self, sample_index: int) -> np.ndarray | None: ...
 
 
 class PolicyRunner(ABC):

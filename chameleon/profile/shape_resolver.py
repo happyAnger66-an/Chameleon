@@ -7,6 +7,7 @@ from typing import Any
 from chameleon.config.schema import TaskConfig
 from chameleon.deploy.build_cfg import load_build_cfg
 from chameleon.deploy.paths import resolve_build_cfg_path, resolve_deploy_paths
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
 from chameleon.profile.execution_plan import ExecutionPlan, PlanMode
 
 
@@ -66,7 +67,7 @@ def _default_deploy_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) ->
     batch = plan.batch_size
     action_dim = int(task.model_overrides.get("action_dim", 32))
     action_horizon = int(task.model_overrides.get("action_horizon", 10))
-    prefix_len = 818
+    prefix_len = PI05_LIBERO_PREFIX_LEN
     num_layers = 18
     head_dim = 256
 

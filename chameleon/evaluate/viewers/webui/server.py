@@ -13,6 +13,7 @@ from typing import Any
 
 from chameleon.config.schema import EvaluateConfig, TaskConfig
 from chameleon.evaluate.lerobot_eval import EvalSummary
+from chameleon.evaluate.meta import build_eval_run_meta
 from chameleon.evaluate.viewers.base import EvalStepEvent, build_eval_viewer
 from chameleon.evaluate.viewers.webui.bridge import AsyncOutboundBridge
 from chameleon.evaluate.viewers.webui.broadcaster import WebsocketBroadcaster
@@ -131,6 +132,7 @@ def _encode_step_event(rt: WebUIServerRuntime, event: EvalStepEvent) -> str:
         metrics=dict(event.metrics),
         images=images,
         server_timing=timing,
+        pred_action_trt=list(event.pred_action_trt) if event.pred_action_trt else None,
     )
     return step_event_to_json(step)
 
@@ -153,19 +155,19 @@ def _infer_worker(task: TaskConfig, rt: WebUIServerRuntime, result: dict[str, An
         start_index = int(getattr(data_cfg, "start_index", 0) or 0)
         num_samples = int(task.evaluate.num_samples)
 
-        meta = {
-            "type": "meta",
-            "run_id": rt.run_id,
-            "repo_id": repo_id,
-            "backend": task.evaluate.policy_runner,
-            "compare_mode": False,
-            "action_horizon": action_horizon,
-            "action_dim": action_dim,
-            "start_index": start_index,
-            "end_index_exclusive": start_index + num_samples,
-            "send_wrist": rt.send_wrist,
-            "jpeg_quality": rt.jpeg_quality,
-        }
+        meta = build_eval_run_meta(
+            task,
+            run_id=rt.run_id,
+            repo_id=repo_id,
+            action_horizon=action_horizon,
+            action_dim=action_dim,
+            start_index=start_index,
+            num_samples=num_samples,
+            extra={
+                "send_wrist": rt.send_wrist,
+                "jpeg_quality": rt.jpeg_quality,
+            },
+        )
         rt.meta_ready["msg"] = json.dumps(meta, ensure_ascii=False, separators=(",", ":"))
 
         sink = build_eval_viewer(

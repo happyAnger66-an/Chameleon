@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 from transformers.cache_utils import DynamicCache
 
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,7 +60,7 @@ def export_expert(
     *,
     dynamo: bool = False,
     export_dtype: torch.dtype = torch.bfloat16,
-    prefix_len: int = 968,
+    prefix_len: int = PI05_LIBERO_PREFIX_LEN,
     action_seq_len: int = 10,
 ) -> Path:
     export_dir = Path(export_dir)

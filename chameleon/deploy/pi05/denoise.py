@@ -12,6 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.cache_utils import DynamicCache
 
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
+
 logger = logging.getLogger(__name__)
 
 _ATTN_MASK_FILL_VALUE = -2.3819763e38
@@ -39,11 +41,7 @@ def create_sinusoidal_pos_embedding(
     return torch.cat([torch.sin(sin_input), torch.cos(sin_input)], dim=1)
 
 
-def make_att_2d_masks(pad_masks: torch.Tensor, att_masks: torch.Tensor) -> torch.Tensor:
-    cumsum = torch.cumsum(att_masks, dim=1)
-    att_2d_masks = cumsum[:, None, :] <= cumsum[:, :, None]
-    pad_2d_masks = pad_masks[:, None, :] * pad_masks[:, :, None]
-    return att_2d_masks & pad_2d_masks
+from chameleon.models.pi05.attention import make_att_2d_masks
 
 
 class Pi05DenoiseExport(nn.Module):
@@ -176,7 +174,7 @@ def export_denoise(
     *,
     dynamo: bool = False,
     export_dtype: torch.dtype = torch.bfloat16,
-    prefix_len: int = 968,
+    prefix_len: int = PI05_LIBERO_PREFIX_LEN,
 ) -> Path:
     export_dir = Path(export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)

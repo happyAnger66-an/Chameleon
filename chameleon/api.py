@@ -123,18 +123,18 @@ def run_eval(task: TaskConfig):
 
     import uuid
 
+    from chameleon.evaluate.meta import build_eval_run_meta
+
     run_id = uuid.uuid4().hex[:12]
-    meta = {
-        "type": "meta",
-        "run_id": run_id,
-        "repo_id": repo_id,
-        "backend": task.evaluate.policy_runner,
-        "compare_mode": False,
-        "action_horizon": action_horizon,
-        "action_dim": action_dim,
-        "start_index": start_index,
-        "end_index_exclusive": start_index + num_samples,
-    }
+    meta = build_eval_run_meta(
+        task,
+        run_id=run_id,
+        repo_id=repo_id,
+        action_horizon=action_horizon,
+        action_dim=action_dim,
+        start_index=start_index,
+        num_samples=num_samples,
+    )
     sink = build_eval_viewer(
         task,
         run_id=run_id,

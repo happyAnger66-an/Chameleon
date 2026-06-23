@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from chameleon.evaluate.norm_stats import load_norm_stats_for_eval, resolve_norm_stats_assets_dir
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,10 +56,11 @@ def build_openpi_eval_transforms(
     data_config = train_cfg.data.create(train_cfg.assets_dirs, train_cfg.model)
     resolved_asset_id = asset_id or getattr(data_config, "asset_id", None)
 
-    norm_stats = _load_norm_stats(
-        checkpoint_dir=checkpoint_dir,
+    norm_stats = load_norm_stats_for_eval(
+        checkpoint_dir=Path(checkpoint_dir).expanduser(),
         norm_stats_dir=norm_stats_dir,
         asset_id=resolved_asset_id,
+        data_config=data_config,
         checkpoints_mod=_checkpoints,
     )
     if norm_stats is None:
@@ -65,10 +68,15 @@ def build_openpi_eval_transforms(
             raise ValueError(
                 f"openpi_config={openpi_config!r} 未解析 asset_id，且无法从 checkpoint 加载 norm_stats。"
             )
-        norm_stats = _checkpoints.load_norm_stats(
-            Path(checkpoint_dir) / "assets",
-            resolved_asset_id,
+        assets_dir = resolve_norm_stats_assets_dir(
+            checkpoint_dir=checkpoint_dir,
+            norm_stats_dir=norm_stats_dir,
         )
+        if assets_dir is None:
+            raise FileNotFoundError(
+                f"无法找到 norm_stats（checkpoint_dir={checkpoint_dir!r} norm_stats_dir={norm_stats_dir!r}）。"
+            )
+        norm_stats = _checkpoints.load_norm_stats(str(assets_dir), resolved_asset_id)
 
     input_transform = transforms.compose(
         [
@@ -94,32 +102,6 @@ def build_openpi_eval_transforms(
         openpi_config=openpi_config,
         asset_id=resolved_asset_id,
     )
-
-
-def _load_norm_stats(
-    *,
-    checkpoint_dir: str | Path,
-    norm_stats_dir: str | Path | None,
-    asset_id: str | None,
-    checkpoints_mod: Any,
-) -> Any | None:
-    assets_dir = norm_stats_dir
-    if assets_dir is None:
-        candidate = Path(checkpoint_dir) / "assets"
-        if candidate.is_dir():
-            assets_dir = candidate
-    if assets_dir is None or asset_id is None:
-        return None
-    try:
-        return checkpoints_mod.load_norm_stats(assets_dir, asset_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "显式加载 norm_stats 失败（assets_dir=%s asset_id=%s）：%s",
-            assets_dir,
-            asset_id,
-            exc,
-        )
-        return None
 
 
 def apply_output_transform(output_transform: Callable[[dict], dict], actions_t: Any, inputs: dict) -> np.ndarray:

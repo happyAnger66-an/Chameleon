@@ -11,8 +11,10 @@
 # 默认形状对应 pi05_libero 常见设置：L_prefix=968，action_horizon=10，action_dim=32，head_dim=256。
 # 若模型 config 不同，请同步修改下列元组。
 
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
+
 _NUM_LAYERS = 18
-_PREFIX_LEN = 818
+_PREFIX_LEN = PI05_LIBERO_PREFIX_LEN
 _ACTION_HORIZON = 10
 _ACTION_DIM = 32
 _HEAD_DIM = 256

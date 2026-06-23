@@ -118,7 +118,19 @@ class TensorRTEngine(Engine):
             if not isinstance(t, torch.Tensor):
                 t = torch.as_tensor(t)
             t = t.to(device=self.device, dtype=torch_dtype).contiguous()
-            self._context.set_input_shape(name, tuple(t.shape))
+            if not self._context.set_input_shape(name, tuple(t.shape)):
+                try:
+                    expected = tuple(self._engine.get_tensor_shape(name))
+                except Exception:  # noqa: BLE001
+                    expected = ("?",)
+                raise RuntimeError(
+                    f"TRT stage {self.stage!r} input {name!r}: got shape {tuple(t.shape)}, "
+                    f"engine expects {expected}. "
+                    "Prefix length mismatch is common when llm/denoise engines were built with "
+                    "a different seq_len than runtime (pi05 LIBERO typically needs 968). "
+                    "Re-run workflow with configs/pi05_libero_trt_deploy.yaml after aligning "
+                    "build_configs llm/denoise_step _PREFIX_LEN / SEQ_LEN."
+                )
             self._context.set_tensor_address(name, t.data_ptr())
             bound.append(t)
         return bound

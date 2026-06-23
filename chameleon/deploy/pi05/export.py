@@ -12,6 +12,7 @@ from chameleon.deploy.pi05.expert import export_expert
 from chameleon.deploy.pi05.llm import export_llm
 from chameleon.deploy.pi05.loader import load_pi05_model
 from chameleon.deploy.pi05.memory import release_export_cuda_memory
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
 from chameleon.deploy.pi05.vit import export_vit
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ def export_stage(
         raise KeyError(f"Unknown pi05 export stage {stage!r}; expected one of {PI05_STAGES}.")
 
     options = dict(options or {})
+    if stage in ("llm", "denoise", "expert"):
+        options.setdefault("seq_len" if stage == "llm" else "prefix_len", PI05_LIBERO_PREFIX_LEN)
     exporter = _EXPORTERS[stage]
     try:
         return exporter(pi05_model, export_dir, **options)

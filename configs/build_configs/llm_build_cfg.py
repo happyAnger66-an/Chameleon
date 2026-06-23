@@ -1,6 +1,8 @@
 # TensorRT-Edge-LLM AttentionPlugin 在 ONNX 中多为 FP16；若 bf16 建引擎报
 # "doesn't report any supported format combinations"，请改为 "fp16"。
-SEQ_LEN = 818
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
+
+SEQ_LEN = PI05_LIBERO_PREFIX_LEN
 build_cfg = {
     "precision": "bf16",
     "workspace_mb": 8192,

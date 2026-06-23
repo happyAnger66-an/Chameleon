@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import torch
 
 from chameleon.config.schema import TaskConfig
@@ -15,21 +13,6 @@ def resolve_torch_device(requested: str | None) -> str | None:
     if requested.startswith("cuda") and not torch.cuda.is_available():
         return "cpu"
     return requested
-
-
-def resolve_checkpoint_dir(task: TaskConfig) -> str:
-    eval_cfg = task.evaluate
-    checkpoint_dir = eval_cfg.checkpoint_dir
-    if checkpoint_dir is None:
-        ckpt = task.model_overrides.get("checkpoint")
-        if ckpt:
-            checkpoint_dir = str(Path(ckpt).parent)
-    if not checkpoint_dir:
-        raise ValueError(
-            "无法确定 checkpoint 目录：请设置 evaluate.checkpoint_dir 或 "
-            "model_overrides.checkpoint。"
-        )
-    return checkpoint_dir
 
 
 def resolve_openpi_config(task: TaskConfig) -> str:
@@ -45,6 +28,12 @@ def resolve_openpi_config(task: TaskConfig) -> str:
 def resolve_eval_device(task: TaskConfig) -> str | None:
     device = task.evaluate.device or task.infer.torch_device
     return resolve_torch_device(device)
+
+
+def resolve_pytorch_load_device(task: TaskConfig) -> str:
+    """openpi 权重加载 device（TRT 评测路径在释放大模块前使用）。"""
+    raw = task.evaluate.pytorch_load_device or "cpu"
+    return resolve_torch_device(raw) or "cpu"
 
 
 def sync_eval_num_samples(task: TaskConfig) -> int:

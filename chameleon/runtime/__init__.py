@@ -1,13 +1,4 @@
-"""推理运行时包 — 导出 Engine / RuntimeBackend 抽象与 VLA 编排。
-
-作用：
-    re-export 运行时接口，import 时注册 PyTorch / TensorRT 运行时及
-    Pi05Orchestrator。
-
-架构位置：
-    运行时层 — 加载 compile 产出的 engine 或 reference nn.Module，
-    经 VLAOrchestrator 驱动链式执行与去噪环。
-"""
+"""推理运行时包 — Engine / RuntimeBackend 抽象与 VLA 编排注册。"""
 
 from chameleon.runtime.base import (
     RUNTIME_REGISTRY,
@@ -18,7 +9,7 @@ from chameleon.runtime.base import (
     register_runtime,
 )
 
-# Import-time registration of built-in runtimes.
+# Import-time registration of built-in runtimes and orchestrators.
 from chameleon.runtime import pytorch  # noqa: F401,E402
 from chameleon.runtime import tensorrt  # noqa: F401,E402
 from chameleon.runtime.orchestrator import (  # noqa: E402
@@ -27,6 +18,8 @@ from chameleon.runtime.orchestrator import (  # noqa: E402
     Orchestrator,
     register_orchestrator,
 )
+from chameleon.runtime import orchestrators  # noqa: F401,E402
+from chameleon.runtime.pi05_trt import orchestrator as _pi05_trt_orchestrator  # noqa: F401,E402
 
 __all__ = [
     "RUNTIME_REGISTRY",

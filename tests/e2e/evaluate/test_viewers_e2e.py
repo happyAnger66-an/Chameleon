@@ -8,7 +8,8 @@ import json
 import pytest
 
 from chameleon.config.schema import TaskConfig
-from chameleon.evaluate.viewers.base import EvalStepEvent, build_eval_viewer, row_step_metrics
+from chameleon.evaluate.metrics import step_metrics
+from chameleon.evaluate.viewers.base import EvalStepEvent, build_eval_viewer
 from chameleon.evaluate.viewers.console import ConsoleViewer
 from chameleon.evaluate.viewers.webui.broadcaster import WebsocketBroadcaster
 from chameleon.evaluate.viewers.webui.bridge import AsyncOutboundBridge, OUTBOUND_STOP
@@ -34,7 +35,7 @@ class TestConsoleViewerE2E:
             prompt="p",
             gt_action=[0.0],
             pred_action=[0.1],
-            metrics=row_step_metrics([0.0], [0.1]),
+            metrics=step_metrics([0.0], [0.1]),
             infer_ms=1.0,
         )
         console.on_step(ev)

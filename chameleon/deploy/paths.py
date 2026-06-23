@@ -84,13 +84,23 @@ def resolve_build_cfg_dir(task: TaskConfig) -> Path:
     return (_chameleon_project_root() / "configs" / "build_configs").resolve()
 
 
+def resolve_engine_dir(task: TaskConfig) -> Path:
+    """TRT engine 目录：``evaluate.engine_dir`` > ``deploy.engine_dir`` > ``{output_dir}/engines``。"""
+    ev = task.evaluate
+    if ev.engine_dir:
+        return Path(ev.engine_dir).expanduser().resolve()
+    deploy_dir = task.deploy.engine_dir
+    if deploy_dir:
+        return Path(deploy_dir).expanduser().resolve()
+    return (Path(task.output_dir).expanduser().resolve() / "engines")
+
+
 def resolve_deploy_paths(task: TaskConfig) -> DeployPaths:
     export_dir = Path(task.deploy.export_dir or f"{task.output_dir}/onnx").expanduser()
-    engine_dir = Path(task.deploy.engine_dir or f"{task.output_dir}/engines").expanduser()
 
     return DeployPaths(
         export_dir=export_dir.resolve(),
-        engine_dir=engine_dir.resolve(),
+        engine_dir=resolve_engine_dir(task),
         checkpoint_dir=resolve_checkpoint_dir(task),
         build_cfg_dir=resolve_build_cfg_dir(task),
         train_config=resolve_train_config(task),

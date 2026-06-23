@@ -1,0 +1,72 @@
+# pi05 LIBERO — 仅 TensorRT engine 推理 vs ground-truth（单路，省显存）。
+#
+# 与 pi05_libero_trt_compare.yaml 不同：不加载浮点 PyTorch 副本，只挂载一套 TRT engine，
+# 预测动作与 LeRobot 真值对比；WebUI 显示 pred vs gt 单曲线。
+#
+# 前置条件：
+#   1. TRT engine 已 build（见 configs/pi05_libero_trt_deploy.yaml）
+#   2. openpi 环境 + TensorRT（Chameleon 内置 runtime）
+#
+# 启动：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli eval \
+#       --config configs/pi05_libero_trt_eval.yaml
+#
+# WebUI（另开终端）：
+#   cd chameleon/evaluate/webui_client && python -m http.server 8080
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_libero_trt_eval
+
+actions:
+  - eval
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_trt/onnx
+  engine_dir: output/pi05_libero_trt/engines
+
+infer:
+  num_steps: 10
+  torch_device: cuda
+
+data:
+  dataset: pi05_libero
+  openpi_config: pi05_libero
+  repo_id: your_hf_username/libero
+  start_index: 0
+  num_samples: 20
+
+evaluate:
+  checkpoint_dir: models/openpi/pytorch
+  norm_stats_dir: ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+  asset_id: physical-intelligence/libero
+  policy_runner: trt_only
+  compare_mode: false
+  engine_dir: output/pi05_libero_trt/engines
+  noise: random
+  precision: bf16
+  trt_cuda_graph: false
+  num_samples: 20
+  stride: 10
+  compare_horizon: null
+  device: cuda
+  pytorch_load_device: cpu   # 权重先加载到 CPU，释放大模块后再在 device 上跑 TRT
+  viewer: both
+  webui_host: 127.0.0.1
+  webui_port: 8767
+  webui_path: /ws
+  webui_history_size: 200
+  webui_show_wrist: true

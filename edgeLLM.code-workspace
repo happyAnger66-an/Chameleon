@@ -20,6 +20,9 @@
 		},
 		{
 			"path": "../../../nio/nio/compiler_runtime"
+		},
+		{
+			"path": "../halos-outside-in-safety"
 		}
 	],
 	"settings": {}

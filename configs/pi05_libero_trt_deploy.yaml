@@ -1,5 +1,7 @@
 # pi05 LIBERO — 真实 openpi 权重 → ONNX 导出 → TensorRT engine 构建。
 #
+# prefix 序列长度须与 LIBERO 三相机 eval 一致（968）；llm/denoise build_cfg 已对齐。
+# 若修改 prefix_len，须重新 export + compile 全部 stage engine。
 # 依赖 openpi 环境（CUDA，用于 ONNX 导出）与 TensorRT（engine build）。
 #
 # 仅导出 ONNX：

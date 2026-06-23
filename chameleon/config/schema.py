@@ -149,11 +149,24 @@ class DataConfig(BaseModel):
     """If set, limit the dataset length to ``num_samples`` frames from ``start_index``."""
 
 
+class TrtEngineNames(BaseModel):
+    """pi05 TRT engine 文件名（相对 ``engine_dir``）。"""
+
+    vit: str = "vit.engine"
+    llm: str = "llm.engine"
+    expert: str = "expert.engine"
+    denoise: str = "denoise.engine"
+    embed_prefix: str = ""
+
+
 class EvaluateConfig(BaseModel):
     """评测配置 — 真实数据集上对比预测动作与 ground-truth。
 
     复用 openpi ``create_trained_policy``（含 norm / tokenize / 输入输出
     transform），逐帧推理后用 ``evaluate.compare_actions`` 计算误差并汇总。
+
+    ``compare_mode=true`` + ``policy_runner=pt_trt_compare`` 时启用 PyTorch 浮点
+    vs TensorRT engine 双路对比（WebUI 展示 ``pred_action`` / ``pred_action_trt``）。
     """
 
     checkpoint_dir: str | None = None
@@ -180,10 +193,36 @@ class EvaluateConfig(BaseModel):
     """当样本缺少 prompt 时注入的默认指令。"""
 
     device: str | None = None
-    """PyTorch 推理设备；缺省时取 infer.torch_device 或自动选择。"""
+    """TRT / PyTorch 推理设备；缺省时取 ``infer.torch_device`` 或自动选择。"""
+
+    pytorch_load_device: str | None = "cpu"
+    """openpi Policy 构建时 PyTorch 权重加载设备（``trt_only`` / ``pt_trt_compare`` TRT 路、
+    ``chameleon`` + ``use_compiled_engines`` 时生效）。默认 ``cpu`` 以在挂载 TRT engine 前
+    避免 GPU OOM；推理仍使用 ``device``。"""
 
     policy_runner: str = "openpi"
-    """策略运行器：``openpi``（openpi Policy）或 ``chameleon``（InferenceSession）。"""
+    """策略运行器：``openpi`` | ``chameleon`` | ``pt_trt_compare`` | ``trt_only``。"""
+
+    compare_mode: bool = False
+    """PyTorch 浮点 vs TensorRT engine 双路对比（须 ``policy_runner=pt_trt_compare``）。"""
+
+    engine_dir: str | None = None
+    """TRT engine 目录；缺省 ``deploy.engine_dir`` 或 ``{output_dir}/engines``。"""
+
+    trt_engines: TrtEngineNames | None = None
+    """各 stage engine 文件名；缺省 vit/llm/expert/denoise.engine。"""
+
+    noise: str = "random"
+    """flow-matching 初值噪声：``random`` | ``fixed``（双路对比建议 ``fixed``）。"""
+
+    noise_seed: int = 0
+    """``noise=fixed`` 时的基础 seed（与 sample index 组合）。"""
+
+    precision: str | None = None
+    """TRT 挂载精度；缺省取 ``model_overrides.precision`` 或 ``bf16``。"""
+
+    trt_cuda_graph: bool = False
+    """TRT 路 CUDA Graph；compare_mode 下会自动关闭。"""
 
     viewer: str = "console"
     """评测结果展示：``console`` | ``webui`` | ``both``。"""

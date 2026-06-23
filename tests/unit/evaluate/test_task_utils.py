@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from chameleon.config.schema import DataConfig, EvaluateConfig, TaskConfig
-from chameleon.evaluate.task_utils import sync_eval_num_samples
+from chameleon.evaluate.task_utils import sync_eval_num_samples, resolve_pytorch_load_device
 
 
 def test_sync_expands_data_window_when_smaller() -> None:
@@ -33,3 +33,13 @@ def test_sync_sets_data_when_unset() -> None:
     )
     sync_eval_num_samples(task)
     assert task.data.num_samples == 50
+
+
+def test_resolve_pytorch_load_device_default() -> None:
+    task = TaskConfig()
+    assert resolve_pytorch_load_device(task) == "cpu"
+
+
+def test_resolve_pytorch_load_device_override() -> None:
+    task = TaskConfig(evaluate=EvaluateConfig(pytorch_load_device="cuda:0"))
+    assert resolve_pytorch_load_device(task) == "cuda:0"

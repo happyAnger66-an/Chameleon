@@ -32,6 +32,8 @@ class EvalStepEvent:
     gt_action: list[float]
     pred_action: list[float]
     metrics: dict[str, Any]
+    pred_action_trt: list[float] | None = None
+    """compare_mode 下 TensorRT 路单步动作。"""
     observation: dict[str, Any] | None = None
     """仅 ``k_in_chunk==0`` 且需要图像时携带；JPEG 编码在消费侧完成。"""
     infer_ms: float | None = None
@@ -77,21 +79,6 @@ class CompositeEventSink(EvalEventSink):
     def on_run_done(self, summary: EvalSummary) -> None:
         for s in self._sinks:
             s.on_run_done(summary)
-
-
-def row_step_metrics(gt_row: np.ndarray, pred_row: np.ndarray) -> dict[str, Any]:
-    diff = np.asarray(pred_row, dtype=np.float64) - np.asarray(gt_row, dtype=np.float64)
-    flat = np.ravel(diff)
-    mse = float(np.mean(flat**2))
-    mae = float(np.mean(np.abs(flat)))
-    return {
-        "mse": mse,
-        "mae": mae,
-        "mse_pt": mse,
-        "mae_pt": mae,
-        "mae_per_dim": [float(abs(flat[i])) for i in range(flat.size)],
-        "mse_per_dim": [float(flat[i] * flat[i]) for i in range(flat.size)],
-    }
 
 
 def build_eval_viewer(

@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 from transformers.cache_utils import DynamicCache
 
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +58,7 @@ def export_llm(
     export_dir: str | Path,
     *,
     dynamo: bool = False,
-    seq_len: int = 968,
+    seq_len: int = PI05_LIBERO_PREFIX_LEN,
 ) -> Path:
     export_dir = Path(export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)

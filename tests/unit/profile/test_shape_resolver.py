@@ -37,7 +37,7 @@ def test_resolve_stage_shapes_from_build_cfg(
     assert vit_shapes["pixel_values"][0] == 3  # _NUM_VIEWS from vit_build_cfg
 
     llm_shapes = resolve_stage_shapes(task, "llm", plan)
-    assert llm_shapes["inputs_embeds"][1] == 818
+    assert llm_shapes["inputs_embeds"][1] == 968
 
 
 def test_reference_shapes() -> None:

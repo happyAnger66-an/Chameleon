@@ -14,6 +14,33 @@ def test_evaluate_defaults() -> None:
     assert ev.viewer == "console"
     assert ev.webui_port == 8765
     assert ev.policy_runner == "openpi"
+    assert ev.compare_mode is False
+    assert ev.noise == "random"
+    assert ev.pytorch_load_device == "cpu"
+
+
+def test_load_trt_compare_yaml(configs_dir: Path) -> None:
+    path = configs_dir / "pi05_libero_trt_compare.yaml"
+    if not path.is_file():
+        pytest.skip("pi05_libero_trt_compare.yaml not present")
+    task = TaskConfig.load(path)
+    assert task.actions == ["eval"]
+    assert task.evaluate.compare_mode is True
+    assert task.evaluate.policy_runner == "pt_trt_compare"
+    assert task.evaluate.viewer == "both"
+    assert task.evaluate.noise == "fixed"
+    assert task.deploy.engine_dir == "output/pi05_libero_trt/engines"
+
+
+def test_load_trt_eval_yaml(configs_dir: Path) -> None:
+    path = configs_dir / "pi05_libero_trt_eval.yaml"
+    if not path.is_file():
+        pytest.skip("pi05_libero_trt_eval.yaml not present")
+    task = TaskConfig.load(path)
+    assert task.evaluate.policy_runner == "trt_only"
+    assert task.evaluate.compare_mode is False
+    assert task.evaluate.engine_dir == "output/pi05_libero_trt/engines"
+    assert task.evaluate.pytorch_load_device == "cpu"
 
 
 def test_deploy_defaults() -> None:
