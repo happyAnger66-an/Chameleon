@@ -319,7 +319,231 @@ Blackwell（Thor）上 L1 cache 与 shared memory **共用同一块片上存储*
 
 ---
 
-## 9. 一句话总结
+## 9. ncu：只采集一次 forward 的分层内存 / 计算分析
+
+目标：**只 profile 一次 LLM 推理（一次 `enqueueV3`）里的 kernel**，而不是 `trtexec --iterations=100` 重复 100 遍。
+
+### 9.1 公共环境
+
+```bash
+export ENGINE=/tmp/build/pi05/opt/llm_fp8.engine
+export PLUGIN=/path/to/libmodel_opt_plugin.so   # 有 custom plugin 时填写
+export SHAPES="inputs_embeds:1x968x2048,attention_mask:1x1x968x968,position_ids:1x968"
+export OUT=/tmp/ncu_llm
+
+mkdir -p "$OUT"
+
+# 有 plugin：
+export PLUGIN_ARGS="--dynamicPlugins=${PLUGIN}"
+# 无 plugin：
+# export PLUGIN_ARGS=""
+```
+
+**ncu 与 trtexec 的硬性约定：**
+
+| 项 | 值 | 原因 |
+|----|-----|------|
+| `--warmUp` | `0` | 不要额外 warmup iteration |
+| `--iterations` | `1` | trtexec 只跑 1 次 forward |
+| `--useCudaGraph` | **不加** | Graph 会把 kernel 藏进 `cudaGraphLaunch`，ncu 难逐 kernel 采 |
+| `--noDataTransfers` | 加 | 去掉 HtoD/DtoH，专注 GPU 计算与 HBM |
+
+---
+
+### 9.2 推荐：NVTX 范围采集（一次完整 forward）
+
+TRT 在 `enqueueV3` 期间会打 NVTX range。用 **capture-range** 只采这一次 enqueue 内的 kernel：
+
+```bash
+sudo ncu \
+  --profile-from-start off \
+  --capture-range nvtx \
+  --capture-range-end stop \
+  --nvtx \
+  --nvtx-include "enqueueV3" \
+  --replay-mode range \
+  --section SpeedOfLight \
+  --section MemoryWorkloadAnalysis \
+  --section ComputeWorkloadAnalysis \
+  --section LaunchStats \
+  --section Occupancy \
+  --target-processes all \
+  -o "${OUT}/llm_one_forward" \
+  --force-overwrite \
+  trtexec \
+    ${PLUGIN_ARGS} \
+    --loadEngine="${ENGINE}" \
+    --shapes="${SHAPES}" \
+    --warmUp=0 \
+    --iterations=1 \
+    --noDataTransfers
+```
+
+**含义：**
+
+- `--profile-from-start off` + `--capture-range nvtx`：默认不采，进入 NVTX range 才开始
+- `--nvtx-include "enqueueV3"`：匹配 TRT 的 `ExecutionContext::enqueueV3` range
+- `--capture-range-end stop`：该 range **结束即停止**，不会采到第二次 iteration
+- `--replay-mode range`：对整个 capture range **replay 一次**（比逐 kernel replay 更适合「一整趟 forward」）
+
+若 range 过宽/过窄，可改用 Myelin 标记：
+
+```bash
+  --nvtx-include "enqueueV3|myelinGraphExecute"
+```
+
+---
+
+### 9.3 备选：限定 kernel 数量（不用 NVTX）
+
+已知一次 forward 约有 **K 个** compute kernel（先用 nsys 数一遍），跳过 engine 加载后的杂项 launch：
+
+```bash
+# 先粗看 kernel 总数（不 profile，只看 launch 次数）
+nsys profile -o /tmp/llm_count --trace=cuda --sample=none \
+  trtexec ${PLUGIN_ARGS} --loadEngine="${ENGINE}" --shapes="${SHAPES}" \
+  --warmUp=0 --iterations=1 --noDataTransfers
+
+nsys stats /tmp/llm_count.nsys-rep --report cuda_gpu_kern_sum | head -30
+```
+
+假设主计算 kernel 从第 1 个 launch 开始、共 **K=200** 个：
+
+```bash
+sudo ncu \
+  --launch-skip 0 \
+  --launch-count 200 \
+  --kernel-name-base demangled \
+  --kernel-name "myl_|cutlass|gemm|Fmha" \
+  --section SpeedOfLight \
+  --section MemoryWorkloadAnalysis \
+  --section ComputeWorkloadAnalysis \
+  --target-processes all \
+  -o "${OUT}/llm_k_kernels" \
+  --force-overwrite \
+  trtexec \
+    ${PLUGIN_ARGS} \
+    --loadEngine="${ENGINE}" \
+    --shapes="${SHAPES}" \
+    --warmUp=0 \
+    --iterations=1 \
+    --noDataTransfers
+```
+
+- `--launch-count K`：最多采 K 次 launch（配合 `iterations=1` 即一趟 forward）
+- `--kernel-name`：过滤 memcpy/memset 等杂项（按 nsys 里实际名字调整 regex）
+
+---
+
+### 9.4 只采某一个热点 kernel（单次 launch）
+
+```bash
+sudo ncu \
+  --launch-skip-before-match 0 \
+  --launch-count 1 \
+  --kernel-name-base demangled \
+  --kernel-name "myl_Fc_myl0" \
+  --set full \
+  --target-processes all \
+  -o "${OUT}/llm_one_kernel" \
+  --force-overwrite \
+  trtexec \
+    ${PLUGIN_ARGS} \
+    --loadEngine="${ENGINE}" \
+    --shapes="${SHAPES}" \
+    --warmUp=0 \
+    --iterations=1 \
+    --noDataTransfers
+```
+
+`--launch-count 1` + `--kernel-name` = **整个 session 只详细 profile 1 次匹配的 kernel launch**。
+
+---
+
+### 9.5 各层级内存 / 计算指标（自定义 metrics）
+
+若不用 `--section`，可显式指定分层指标（Thor / Blackwell）：
+
+```bash
+export NCU_METRICS="\
+dram__bytes_read.sum,dram__bytes_write.sum,\
+dram__throughput.avg.pct_of_peak_sustained_elapsed,\
+lts__t_sectors.sum,lts__throughput.avg.pct_of_peak_sustained_elapsed,\
+l1tex__t_sectors.sum,l1tex__throughput.avg.pct_of_peak_sustained_elapsed,\
+l1tex__data_pipe_lsu_wavefronts_mem_shared_op_ld.sum,\
+sm__throughput.avg.pct_of_peak_sustained_elapsed,\
+sm__inst_executed_pipe_tensor.avg.pct_of_peak_sustained_elapsed,\
+smsp__sass_thread_inst_executed_op_ffma_pred_on.sum,\
+gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed"
+
+sudo ncu \
+  --profile-from-start off \
+  --capture-range nvtx \
+  --capture-range-end stop \
+  --nvtx --nvtx-include "enqueueV3" \
+  --replay-mode range \
+  --metrics "${NCU_METRICS}" \
+  --target-processes all \
+  -o "${OUT}/llm_metrics" \
+  --force-overwrite \
+  trtexec \
+    ${PLUGIN_ARGS} \
+    --loadEngine="${ENGINE}" \
+    --shapes="${SHAPES}" \
+    --warmUp=0 \
+    --iterations=1 \
+    --noDataTransfers
+```
+
+| 指标组 | 看的层级 |
+|--------|----------|
+| `dram__*` | **HBM / 设备内存**（读写字节、带宽占比） |
+| `lts__*` | **L2** |
+| `l1tex__*`（global） | **L1 / TEX**（global load/store） |
+| `l1tex__*_mem_shared_*` | **Shared memory** 访问 |
+| `sm__throughput` / `pipe_tensor` | **SM 计算 / Tensor Core** |
+| `gpu__compute_memory_throughput` | 计算 vs 内存 **roofline 总览** |
+
+`--section SpeedOfLight` 会自动给出 **Memory Throughput % vs Compute Throughput %**，适合快速判断 memory-bound 还是 compute-bound。
+
+---
+
+### 9.6 查看结果
+
+```bash
+# CLI 汇总
+ncu --import "${OUT}/llm_one_forward.ncu-rep" --page details
+
+# 按 kernel 导出 CSV
+ncu --import "${OUT}/llm_one_forward.ncu-rep" --csv > "${OUT}/summary.csv"
+
+# GUI（本地有 display 时）
+ncu-ui "${OUT}/llm_one_forward.ncu-rep"
+```
+
+GUI 里重点页：
+
+- **Details**：单 kernel 全指标
+- **Speed of Light**：HBM / L2 / L1 带宽 vs 峰值
+- **Memory Workload Analysis**：DRAM/L2/L1 流量分解
+- **Compute Workload Analysis**：Tensor Core / FMA 占比
+- **Launch Statistics / Occupancy**：shared、reg、occupancy（与本文 §1–§5 对照）
+
+---
+
+### 9.7 常见坑
+
+| 现象 | 处理 |
+|------|------|
+| ncu 采了 0 个 kernel | 开了 `--useCudaGraph` → 去掉；或 NVTX 名不匹配 → 改 `--nvtx-include` |
+| 仍然采到多遍 | 确认 `--warmUp=0 --iterations=1`；用 §9.2 的 capture-range |
+| 非常慢 | 不要用 `--set full` 采整趟 forward；先用 §9.2 的 section，或 §9.4 只采 1 个 kernel |
+| permission denied | Thor 上 ncu 通常需 `sudo`，或配置 `/etc/modprobe.d` 的 profiling 权限 |
+| 指标 unavailable | 确认 GPU 架构（Blackwell sm_100）；换 `--section` 代替手写 metrics |
+
+---
+
+## 10. 一句话总结
 
 - **228 KiB/SM** = SM 硬件 shared 池总容量；**227 KiB/block** = 单 block 可申请 dynamic 上限；差 **1 KiB** 为 CUDA 每 block 固定保留。
 - **Shared executed** = **每个 block** 实际占用（227 KiB + 1 KiB），不是全 grid 总和。
