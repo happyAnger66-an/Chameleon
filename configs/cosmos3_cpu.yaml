@@ -1,0 +1,20 @@
+# Cosmos3 reference 冒烟 — 在 CPU 上端到端跑通 MoT 去噪环（video + action 复用同一图）。
+# 无需任何外部权重；用于验证 vae_encode -> text_embed -> dit(CFG) -> vae_decode 控制流。
+
+architecture: cosmos3
+model: cosmos3
+platform: generic_cpu
+output_dir: output/cosmos3_cpu
+
+actions:
+  - infer
+
+# mode=video 输出视频张量 [B, T, C, H, W]；改为 action 输出 action chunk [B, H, D]。
+generate:
+  mode: video
+  guidance_scale: 6.0
+  num_inference_steps: 6
+
+infer:
+  batch_size: 1
+  num_steps: 6

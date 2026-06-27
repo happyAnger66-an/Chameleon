@@ -1,0 +1,36 @@
+# Cosmos3 action 策略生成 — 真实 diffusers 权重（CosmosActionCondition）。
+# 输出 action chunk（对齐 pi05 VLA），同时联合生成 video。
+# 需安装 cosmos3 extra 并可访问权重；加载失败优雅回退 reference。
+
+architecture: cosmos3
+model: cosmos3
+platform: nvidia_ada
+output_dir: output/cosmos3_action
+
+actions:
+  - infer
+
+model_overrides:
+  use_reference: false
+  model_id: nvidia/Cosmos3-Nano
+  precision: bfloat16
+  mode: action
+  action_dim: 32
+  action_horizon: 16
+
+generate:
+  mode: action
+  prompt: "Pick up the cup and place it on the plate."
+  num_inference_steps: 35
+  guidance_scale: 6.0
+  output_type: pt
+  action:
+    mode: policy
+    chunk_size: 16
+    domain_name: bridge_orig_lerobot
+    resolution_tier: 480
+    view_point: ego_view
+
+infer:
+  batch_size: 1
+  torch_device: cuda

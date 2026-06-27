@@ -31,7 +31,7 @@ from chameleon.api import (
 from chameleon.config.schema import TaskConfig
 from chameleon.core.artifact import Artifact, Manifest
 from chameleon.core.registry import Registry
-from chameleon.deploy.backends import is_pi05_deploy_backend
+from chameleon.deploy.backends import is_cosmos3_deploy_backend, is_pi05_deploy_backend
 from chameleon.deploy.trt_profile import iter_profile_steps
 
 logger = logging.getLogger(__name__)
@@ -118,9 +118,11 @@ class ExportAction(WorkflowAction):
             f"  export:   stage={s.stage} backend={backend}" for s in task.export or []
         ]
         if not task.export:
-            lines.append(
-                f"  export:   default stages vit/llm/expert/denoise -> {export_dir}"
-            )
+            if is_cosmos3_deploy_backend(backend):
+                default_stages = "vae_encode/text_embed/dit/vae_decode"
+            else:
+                default_stages = "vit/llm/expert/denoise"
+            lines.append(f"  export:   default stages {default_stages} -> {export_dir}")
         return lines
 
     def run(self, ctx: WorkflowContext) -> None:
@@ -136,7 +138,8 @@ class CompileAction(WorkflowAction):
         ]
 
     def run(self, ctx: WorkflowContext) -> None:
-        if is_pi05_deploy_backend(ctx.task.deploy.backend):
+        backend = ctx.task.deploy.backend
+        if is_pi05_deploy_backend(backend) or is_cosmos3_deploy_backend(backend):
             ctx.compiled_engines = run_deploy_build(ctx.task, ctx.manifest)
         else:
             ctx.compiled_engines = run_compile(ctx.task, ctx.adapter(), ctx.manifest)
@@ -183,15 +186,19 @@ class InferAction(WorkflowAction):
             stage_runtimes=stage_runtimes,
         )
         used = sorted(stage_artifacts) if stage_artifacts else []
+        metadata: dict[str, Any] = {"engines_used": used}
+        try:
+            tensor_out = torch.as_tensor(actions_out)
+            metadata["action_shape"] = list(tensor_out.shape)
+            metadata["action_mean"] = float(tensor_out.float().mean())
+        except (TypeError, ValueError, RuntimeError):
+            # Non-tensor primary output (e.g. cosmos3 PIL / list video); record type only.
+            metadata["output_type"] = type(actions_out).__name__
         ctx.manifest.add(
             Artifact(
                 kind="inference",
                 platform=ctx.task.platform,
-                metadata={
-                    "action_shape": list(actions_out.shape),
-                    "action_mean": float(torch.as_tensor(actions_out).float().mean()),
-                    "engines_used": used,
-                },
+                metadata=metadata,
             )
         )
         if used:

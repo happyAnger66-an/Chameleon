@@ -59,6 +59,11 @@ def _run_context(task: TaskConfig) -> RunContext:
     requested_device = task.infer.torch_device or platform.torch_device
     options["torch_device"] = _resolve_torch_device(requested_device)
     options["enable_cuda_graph"] = task.infer.cuda_graph
+    # cosmos3 (and other generative) orchestrators read the generation config and
+    # CFG scale off the run options; harmless for pi05 which ignores them.
+    options["generate"] = task.generate
+    options["mode"] = task.generate.mode
+    options["guidance_scale"] = task.generate.guidance_scale
     return RunContext(platform=platform, architecture=task.architecture, options=options)
 
 
@@ -67,8 +72,13 @@ def run_infer(
     *,
     stage_artifacts: dict[str, Artifact] | None = None,
     stage_runtimes: dict[str, str] | None = None,
-) -> torch.Tensor:
-    """Build a session and run a single inference, returning the action chunk.
+) -> Any:
+    """Build a session and run a single inference, returning the primary output.
+
+    For action models (pi05, cosmos3 ``mode=action``) this is the action chunk
+    ``[B, horizon, action_dim]``; for cosmos3 ``mode=video`` it is the generated
+    video tensor ``[B, T, C, H, W]`` (or a latent proxy). Richer multimodal
+    outputs (sound / full pipeline output) are exposed on the orchestrator.
 
     ``stage_artifacts`` injects compiled engines (closing the compile->infer loop);
     ``stage_runtimes`` overrides the per-stage runtime (e.g. ``tensorrt`` for
@@ -198,13 +208,17 @@ def run_export(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
 
     ``deploy.backend=pi05`` uses Chameleon built-in pi05 stage exporters.
     """
-    from chameleon.deploy.backends import is_pi05_deploy_backend
+    from chameleon.deploy.backends import is_cosmos3_deploy_backend, is_pi05_deploy_backend
 
     backend = (task.deploy.backend or "reference").strip().lower()
     if is_pi05_deploy_backend(backend):
         from chameleon.deploy.pi05_openpi import run_pi05_export
 
         return run_pi05_export(task, manifest)
+    if is_cosmos3_deploy_backend(backend):
+        from chameleon.deploy.cosmos3_diffusers import run_cosmos3_export
+
+        return run_cosmos3_export(task, manifest)
     if backend == "reference":
         raise NotImplementedError(
             "reference export is handled inside run_compile (capture -> ONNX). "
@@ -215,16 +229,20 @@ def run_export(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
 
 
 def run_deploy_build(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
-    """Build TRT engines from exported ONNX (pi05 deploy path)."""
-    from chameleon.deploy.backends import is_pi05_deploy_backend
+    """Build TRT engines from exported ONNX (pi05 / cosmos3 deploy path)."""
+    from chameleon.deploy.backends import is_cosmos3_deploy_backend, is_pi05_deploy_backend
 
     backend = (task.deploy.backend or "reference").strip().lower()
     if is_pi05_deploy_backend(backend):
         from chameleon.deploy.pi05_openpi import run_pi05_build
 
         return run_pi05_build(task, manifest)
+    if is_cosmos3_deploy_backend(backend):
+        from chameleon.deploy.cosmos3_diffusers import run_cosmos3_build
+
+        return run_cosmos3_build(task, manifest)
     raise ValueError(
-        f"run_deploy_build requires deploy.backend=pi05 (got {backend!r}). "
+        f"run_deploy_build requires deploy.backend=pi05|cosmos3 (got {backend!r}). "
         "Use run_compile for the reference adapter path."
     )
 
@@ -251,7 +269,7 @@ def run_compile(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) -> 
             module = adapter.stage_module(step.stage)
             obs = adapter.example_observation(task.infer.batch_size, device=device)
             example_inputs = _stage_example_inputs(adapter, step.stage, obs)
-            input_names, output_names = _stage_io_names(step.stage)
+            input_names, output_names = _stage_io_names(step.stage, adapter)
             onnx_path = f"{task.output_dir}/{step.stage}.onnx"
             graph = capture.capture(
                 module,
@@ -294,13 +312,25 @@ _STAGE_IO_NAMES: dict[str, tuple[list[str], list[str]]] = {
 }
 
 
-def _stage_io_names(stage: str) -> tuple[list[str] | None, list[str] | None]:
+def _stage_io_names(
+    stage: str, adapter: ModelAdapter | None = None
+) -> tuple[list[str] | None, list[str] | None]:
+    # Model-specific adapters may declare their own stage I/O names (e.g. cosmos3).
+    hook = getattr(adapter, "stage_io_names", None)
+    if hook is not None:
+        names = hook(stage)
+        if names is not None and names[0] is not None:
+            return names
     names = _STAGE_IO_NAMES.get(stage)
     return names if names is not None else (None, None)
 
 
 def _stage_example_inputs(adapter: ModelAdapter, stage: str, obs: dict[str, Any]):
-    """Positional example inputs matching each pi05 stage's forward signature."""
+    """Positional example inputs matching each stage's forward signature."""
+    # Defer to a model-specific hook when present (e.g. cosmos3 stages).
+    hook = getattr(adapter, "stage_example_inputs", None)
+    if hook is not None and stage not in ("vit", "llm_prefix", "action_expert"):
+        return hook(stage, obs)
     if stage == "vit":
         return (obs["images"],)
     if stage == "llm_prefix":

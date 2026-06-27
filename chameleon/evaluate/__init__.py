@@ -9,6 +9,7 @@
 """
 
 from chameleon.evaluate.chameleon_runner import ChameleonOrchestratorRunner
+from chameleon.evaluate.cosmos3_runner import Cosmos3PolicyRunner
 from chameleon.evaluate.pt_trt_compare_runner import Pi05PtTrtCompareRunner
 from chameleon.evaluate.trt_only_runner import Pi05TrtOnlyRunner
 from chameleon.evaluate.compare import ActionDiff, compare_actions
@@ -34,6 +35,7 @@ __all__ = [
     "register_policy_runner",
     "OpenPiPolicyRunner",
     "ChameleonOrchestratorRunner",
+    "Cosmos3PolicyRunner",
     "Pi05PtTrtCompareRunner",
     "Pi05TrtOnlyRunner",
     "evaluate_lerobot",

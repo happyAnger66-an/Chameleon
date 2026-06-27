@@ -20,6 +20,7 @@ from chameleon.runtime.orchestrator import (  # noqa: E402
 )
 from chameleon.runtime import orchestrators  # noqa: F401,E402
 from chameleon.runtime.pi05_trt import orchestrator as _pi05_trt_orchestrator  # noqa: F401,E402
+from chameleon.runtime.cosmos3_trt import orchestrator as _cosmos3_trt_orchestrator  # noqa: F401,E402
 
 __all__ = [
     "RUNTIME_REGISTRY",

@@ -19,6 +19,7 @@ from chameleon.models.base import (
 
 # Import-time registration of built-in model adapters.
 from chameleon.models import pi05  # noqa: F401,E402
+from chameleon.models import cosmos3  # noqa: F401,E402
 
 __all__ = [
     "MODEL_REGISTRY",

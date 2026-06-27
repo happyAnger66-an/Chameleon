@@ -40,14 +40,15 @@ class ExportStep(BaseModel):
 
 
 class DeployConfig(BaseModel):
-    """TRT 部署流水线 — 真实 pi05 的 ONNX 导出与 engine 构建。
+    """TRT 部署流水线 — 真实 pi05 / cosmos3 的 ONNX 导出与 engine 构建。
 
-    ``backend=pi05`` 时使用 ``chameleon.deploy`` 内置 exporter 与 TRT build；
+    ``backend=pi05`` 时使用 ``chameleon.deploy`` 内置 pi05 exporter 与 TRT build；
+    ``backend=cosmos3`` 走 cosmos3 的 vae_encode / dit / vae_decode 分阶段导出；
     ``reference`` 仍走 Chameleon reference 图捕获 + 简化编译器。
     """
 
     backend: str = "reference"
-    """``reference`` | ``pi05``（``pi05_openpi`` 为兼容别名）。"""
+    """``reference`` | ``pi05``（``pi05_openpi`` 别名）| ``cosmos3``。"""
 
     export_dir: str | None = None
     """ONNX 输出目录；缺省 ``{output_dir}/onnx``。"""
@@ -117,6 +118,75 @@ class InferConfig(BaseModel):
     (per stage) via the platform runtime, instead of the PyTorch reference path."""
     cuda_graph: bool = False
     """Capture/replay a CUDA graph per engine (TensorRT runtime; static shapes)."""
+
+
+class ActionGenConfig(BaseModel):
+    """Cosmos3 动作条件生成参数（对齐 diffusers ``CosmosActionCondition``）。"""
+
+    mode: str = "policy"
+    """``policy`` | ``forward_dynamics`` | ``inverse_dynamics``。"""
+
+    chunk_size: int = 16
+    """动作 chunk 长度；视频帧数取 ``chunk_size + 1``。"""
+
+    domain_name: str = "bridge_orig_lerobot"
+    """具身域名（选择 DomainAwareLinear 权重）。"""
+
+    resolution_tier: int = 480
+    """条件画布分辨率档位：256 | 480 | 704 | 720。"""
+
+    view_point: str = "ego_view"
+    """相机视角：``ego_view`` | ``third_person_view`` | ``wrist_view`` | ``concat_view``。"""
+
+    video: str | None = None
+    """条件视频路径（policy/inverse_dynamics 需要）。"""
+
+    image: str | None = None
+    """条件图像路径（policy/forward_dynamics 可用）。"""
+
+
+class GenerateConfig(BaseModel):
+    """Cosmos3 生成配置 — 由 cosmos3 orchestrator 消费驱动 ``Cosmos3OmniPipeline``。
+
+    ``mode=video`` 时走 text/image/video-to-video 扩散，输出视频（+可选 sound）；
+    ``mode=action`` 时走 action 策略生成，输出 action chunk（对齐 pi05 VLA）。
+    reference 路径只消费 ``mode`` / ``num_inference_steps`` / ``guidance_scale``。
+    """
+
+    mode: str = "video"
+    """``video`` | ``action``。"""
+
+    prompt: str | None = None
+    """文本 prompt；video 模式建议传入 JSON-upsampled prompt 字符串。"""
+
+    negative_prompt: str | None = None
+    """CFG 负向 prompt；缺省走 pipeline 内置默认。"""
+
+    image: str | None = None
+    """image-to-video 的条件图路径。"""
+
+    video: str | None = None
+    """video-to-video 的条件视频路径。"""
+
+    num_frames: int | None = None
+    """生成帧数；缺省取架构 metadata（189）。``num_frames=1`` 为文生图。"""
+
+    height: int | None = None
+    width: int | None = None
+    fps: float = 24.0
+    num_inference_steps: int = 35
+    guidance_scale: float = 6.0
+    enable_sound: bool = False
+    """是否联合生成音频（需 checkpoint 含 sound_tokenizer）。"""
+
+    output_type: str = "pt"
+    """``pt`` | ``np`` | ``pil`` | ``latent``；reference 与 infer smoke 用 ``pt``。"""
+
+    flow_shift: float = 10.0
+    """UniPCMultistepScheduler 的 flow_shift（video 模式推荐 10.0）。"""
+
+    action: ActionGenConfig = Field(default_factory=ActionGenConfig)
+    """action 模式的细化参数。"""
 
 
 class DataConfig(BaseModel):
@@ -275,6 +345,8 @@ class TaskConfig(BaseModel):
     profile: TrtProfileConfig = Field(default_factory=TrtProfileConfig)
     """trtexec --dumpProfile / WebUI 配置。"""
     infer: InferConfig = Field(default_factory=InferConfig)
+    generate: GenerateConfig = Field(default_factory=GenerateConfig)
+    """Cosmos3 生成配置（mode=video/action）；仅 cosmos3 模型消费。"""
     data: DataConfig = Field(default_factory=DataConfig)
     """Real-dataset config consumed by the dataloader / evaluate paths."""
     evaluate: EvaluateConfig = Field(default_factory=EvaluateConfig)

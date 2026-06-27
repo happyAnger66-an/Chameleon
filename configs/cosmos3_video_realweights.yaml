@@ -1,0 +1,33 @@
+# Cosmos3 video/world 生成 — 真实 diffusers 权重（Cosmos3OmniPipeline）。
+# 需安装 cosmos3 extra：pip install -e ".[cosmos3]"，并可访问 nvidia/Cosmos3-* 权重。
+# use_reference=false 时 adapter 加载 diffusers pipeline；加载失败会优雅回退 reference。
+
+architecture: cosmos3
+model: cosmos3
+platform: nvidia_ada
+output_dir: output/cosmos3_video
+
+actions:
+  - infer
+
+model_overrides:
+  use_reference: false
+  model_id: nvidia/Cosmos3-Nano
+  precision: bfloat16
+  mode: video
+
+generate:
+  mode: video
+  prompt: "A robot arm picks up a red cube on a wooden table, cinematic lighting."
+  num_frames: 189
+  height: 720
+  width: 1280
+  fps: 24.0
+  num_inference_steps: 35
+  guidance_scale: 6.0
+  enable_sound: false
+  output_type: pt
+
+infer:
+  batch_size: 1
+  torch_device: cuda

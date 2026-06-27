@@ -1,0 +1,61 @@
+# Cosmos3 — ONNX 导出 → TensorRT engine 构建 → TRT 推理闭环。
+#
+# 默认对应 reference 模型尺寸（小尺寸 MoT），可在 CPU 上离线导出 ONNX，无需 diffusers
+# 权重，便于打通 export -> compile -> infer 流程。真实权重部署：设 model_overrides
+# .use_reference=false 并同步各 build_cfg 形状（联合序列长度须固定一个 profile）。
+#
+# 仅导出 ONNX（dry-run 仅打印计划；实际导出去掉 --dry-run）：
+#   PYTHONPATH=. python -m chameleon.cli workflow --config configs/cosmos3_trt_deploy.yaml --dry-run
+# 导出 + build（需 TensorRT + GPU）：
+#   PYTHONPATH=. python -m chameleon.cli workflow --config configs/cosmos3_trt_deploy.yaml
+
+architecture: cosmos3
+model: cosmos3
+platform: nvidia_ada
+output_dir: output/cosmos3_trt
+
+actions:
+  - export
+  - compile
+  - infer
+
+model_overrides:
+  use_reference: true
+  mode: video
+
+generate:
+  mode: video
+  guidance_scale: 6.0
+  num_inference_steps: 6
+
+deploy:
+  backend: cosmos3
+  export_dir: output/cosmos3_trt/onnx
+  engine_dir: output/cosmos3_trt/engines
+  use_cudagraph: false
+
+export:
+  - stage: vae_encode
+  - stage: text_embed
+  - stage: dit
+  - stage: vae_decode
+
+compile:
+  - stage: vae_encode
+    options:
+      build_cfg: configs/build_configs/cosmos3_vae_encode_build_cfg.py
+  - stage: text_embed
+    options:
+      build_cfg: configs/build_configs/cosmos3_text_embed_build_cfg.py
+  - stage: dit
+    options:
+      build_cfg: configs/build_configs/cosmos3_dit_build_cfg.py
+  - stage: vae_decode
+    options:
+      build_cfg: configs/build_configs/cosmos3_vae_decode_build_cfg.py
+
+infer:
+  batch_size: 1
+  num_steps: 6
+  use_compiled_engines: false
+  torch_device: cuda
