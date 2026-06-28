@@ -23,6 +23,15 @@
 		},
 		{
 			"path": "../halos-outside-in-safety"
+		},
+		{
+			"path": "../hpc_bench"
+		},
+		{
+			"path": "../SysPeek"
+		},
+		{
+			"path": "../../../myDocs"
 		}
 	],
 	"settings": {}
