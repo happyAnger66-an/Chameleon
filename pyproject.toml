@@ -48,6 +48,9 @@ cosmos3 = [
     "safetensors>=0.4",
 ]
 eval-ui = ["websockets>=12", "opencv-python-headless>=4.8"]
+# Browser config WebUI (chameleon webui): pick/edit/validate task YAMLs.
+#   pip install -e ".[webui]"
+webui = ["fastapi>=0.110", "uvicorn>=0.29"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
@@ -56,6 +59,9 @@ chameleon = "chameleon.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["chameleon*"]
+
+[tool.setuptools.package-data]
+"chameleon.webui" = ["client/*.html", "client/*.css", "client/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

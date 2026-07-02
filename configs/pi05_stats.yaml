@@ -1,0 +1,47 @@
+# pi05 真实模型「计算量 / 访存量」统计（不做推理、量化或编译）。
+#
+# 用途：估算真实 openpi pi05 每次推理的 MACs / FLOPs（自动按 G/TFLOPs 显示）与
+# 内存流量（权重 + 激活 + attention KV），并给出算术强度 (MAC/Byte)。
+#
+# 依赖：openpi 运行时可导入 + 真实权重（deploy.checkpoint_dir 下的 safetensors）。
+# theoretical 统计在 CPU 即可跑（无需 GPU）；如需实测 VRAM 峰值，把 infer.torch_device
+# 设为 cuda 并加 --measured（需 GPU + torch.profiler）。
+#
+# 运行（表格）：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli stats \
+#       --config configs/pi05_stats.yaml
+#
+# 导出 JSON（含逐 stage 的 flops / weight_bytes / activation_bytes / attention_bytes）：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli stats \
+#       --config configs/pi05_stats.yaml --format json --output output/pi05_stats/stats.json
+#
+# 实测校验（GPU，输出 profiler_flops 与 peak_device_memory）：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli stats \
+#       --config configs/pi05_stats.yaml --measured   # 需先把 torch_device 改为 cuda
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_stats
+
+# stats 是独立子命令，不消费 actions；留空以表明本配置只用于统计。
+actions: []
+
+model_overrides:
+  use_reference: false          # 用真实 pi05 权重，而非参考替身模型
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10            # 与 LIBERO 部署一致；改这里会同步影响 expert/denoise 形状
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16           # 决定访存量的 dtype 字节数（bf16=2B）
+
+deploy:
+  backend: pi05                 # 走真实 pi05 stage（vit / llm / expert / denoise）
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+
+infer:
+  batch_size: 1
+  num_steps: 10                 # denoise 迭代次数（decode 循环按此次数累计）
+  torch_device: cuda             # theoretical 统计用 CPU；实测 VRAM 请改为 cuda 并加 --measured

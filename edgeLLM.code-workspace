@@ -32,6 +32,24 @@
 		},
 		{
 			"path": "../../../myDocs"
+		},
+		{
+			"path": "../tvm"
+		},
+		{
+			"path": "../mlc-llm"
+		},
+		{
+			"path": "../../model_optimizer/FlashRT"
+		},
+		{
+			"path": "../diffusers"
+		},
+		{
+			"path": "../cosmos"
+		},
+		{
+			"path": "../mlc-vla"
 		}
 	],
 	"settings": {}

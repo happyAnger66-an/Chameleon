@@ -30,6 +30,7 @@ USAGE = (
     + "|   chameleon workflow --config <yaml>                           |\n"
     + "|   chameleon profile  --config <yaml>                           |\n"
     + "|   chameleon stats    --config <yaml>                           |\n"
+    + "|   chameleon webui              Launch the config WebUI           |\n"
     + "|   chameleon help               Show this message                 |\n"
     + "-" * 68
 )
@@ -46,6 +47,7 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
     from chameleon.commands.quantize import quantize_cli
     from chameleon.commands.stats import stats_cli
     from chameleon.commands.trt_profile import trt_profile_cli
+    from chameleon.commands.webui import webui_cli
     from chameleon.commands.workflow import workflow_cli
 
     return {
@@ -62,6 +64,7 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
         "workflow": workflow_cli,
         "profile": profile_cli,
         "stats": stats_cli,
+        "webui": webui_cli,
     }
 
 

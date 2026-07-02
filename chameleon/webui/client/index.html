@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Chameleon WebUI</title>
+    <link rel="stylesheet" href="./static/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Chameleon <span class="brandSub">WebUI</span></div>
+      <div class="controls">
+        <label class="field">
+          <span class="kv">配置</span>
+          <select id="configSelect" class="select" aria-label="选择配置文件">
+            <option value="">加载中…</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="kv">命令</span>
+          <select id="commandSelect" class="select selectNarrow" aria-label="选择运行命令">
+            <option value="workflow">workflow</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="kv">解释器</span>
+          <input
+            id="interpreter"
+            class="input"
+            list="interpreterPresets"
+            placeholder="默认：服务端 python"
+            autocomplete="off"
+            spellcheck="false"
+            title="运行 CLI 的 Python 解释器；真实权重配置常需 openpi venv"
+          />
+          <datalist id="interpreterPresets">
+            <option value="python"></option>
+            <option value="models/openpi/.venv/bin/python"></option>
+          </datalist>
+        </label>
+        <button id="btnReload" class="btn btn-secondary" title="重新读取所选配置（放弃编辑）">
+          重新载入
+        </button>
+        <button id="btnValidate" class="btn" title="用 schema 校验当前编辑内容">校验</button>
+        <button id="btnRun" class="btn btn-primary" title="以子进程运行当前配置">运行</button>
+        <button id="btnCancel" class="btn btn-secondary" disabled title="终止当前运行">
+          取消
+        </button>
+        <span id="status" class="badge badge-gray">就绪</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card editorCard">
+        <div class="cardHead">
+          <span class="cardTitle">配置编辑器</span>
+          <span id="editorMeta" class="sub mono">-</span>
+        </div>
+        <textarea
+          id="editor"
+          class="editor mono"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="从上方下拉选择一个配置文件…"
+        ></textarea>
+      </section>
+
+      <aside class="card sideCard">
+        <div class="cardHead"><span class="cardTitle">流水线步骤</span></div>
+        <ol id="actionsList" class="actions">
+          <li class="muted">选择配置后显示 actions</li>
+        </ol>
+
+        <div class="cardHead cardHeadGap"><span class="cardTitle">校验结果</span></div>
+        <div id="validateResult" class="validateResult muted">尚未校验</div>
+      </aside>
+
+      <section class="card logCard">
+        <div class="cardHead">
+          <span class="cardTitle">运行日志</span>
+          <span id="runMeta" class="sub mono">-</span>
+        </div>
+        <pre id="logConsole" class="logConsole mono" aria-live="polite"></pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      本页面由 <code>chameleon webui</code> 提供服务。运行会把当前编辑内容落盘到
+      <code>output/webui_runs/&lt;run_id&gt;/config.yaml</code> 并以子进程执行，日志经
+      WebSocket 实时回显；校验/运行都不会修改 <code>configs/</code> 下的原始文件。
+    </footer>
+
+    <script defer src="./static/app.js"></script>
+  </body>
+</html>
