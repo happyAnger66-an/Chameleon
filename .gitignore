@@ -85,5 +85,5 @@ lib*.so
 *.trace
 *.nsys-rep
 *.qdrep
-models/
-output/
+# External model weights at repo root (openpi checkpoints); not chameleon/models/ source.
+/models/
