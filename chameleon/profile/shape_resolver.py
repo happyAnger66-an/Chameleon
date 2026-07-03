@@ -106,6 +106,45 @@ def _cosmos3_reference_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan)
     raise KeyError(f"Unknown cosmos3 reference stage {stage!r}.")
 
 
+def _cosmos3_real_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict[str, tuple[int, ...]]:
+    """真实 diffusers 权重 profile — 从 task.generate 推断 Wan VAE / MoT 形状。"""
+    profile = _video_profile_from_task(task)
+    batch = plan.batch_size
+    num_frames = int(profile["num_frames"])
+    height = int(profile["height"])
+    width = int(profile["width"])
+    t_scale = int(task.model_overrides.get("vae_temporal_compression", 4))
+    s_scale = int(task.model_overrides.get("vae_spatial_compression", 16))
+    z_dim = int(task.model_overrides.get("z_dim", 16))
+    latent_t = (num_frames - 1) // t_scale + 1
+    latent_h = height // s_scale
+    latent_w = width // s_scale
+    text_len = int(task.model_overrides.get("text_seq_len", 512))
+
+    if stage == "vae_encode":
+        return {"cond_pixels": (batch, 3, num_frames, height, width)}
+    if stage == "text_embed":
+        return {"lang_tokens": (text_len,)}
+    if stage == "dit":
+        gen_tokens = latent_t * latent_h * latent_w
+        return {
+            "sequence_length": (text_len + gen_tokens,),
+            "vision_tokens": (z_dim, latent_t, latent_h, latent_w),
+        }
+    if stage == "vae_decode":
+        return {"latent": (batch, z_dim, latent_t, latent_h, latent_w)}
+    raise KeyError(f"Unknown cosmos3 real stage {stage!r}.")
+
+
+def _video_profile_from_task(task: TaskConfig) -> dict[str, int | float]:
+    gen = task.generate
+    return {
+        "num_frames": int(getattr(gen, "num_frames", None) or task.model_overrides.get("num_frames", 189)),
+        "height": int(getattr(gen, "height", None) or task.model_overrides.get("height", 720)),
+        "width": int(getattr(gen, "width", None) or task.model_overrides.get("width", 1280)),
+    }
+
+
 def _cosmos3_default_deploy_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict[str, tuple[int, ...]]:
     # Deploy build_cfg defaults mirror reference small MoT profile.
     return _cosmos3_reference_shapes(task, stage, plan)
@@ -152,6 +191,8 @@ def resolve_stage_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> d
     if task.architecture == "cosmos3":
         if plan.mode == PlanMode.REFERENCE:
             return _cosmos3_reference_shapes(task, stage, plan)
+        if plan.mode == PlanMode.REAL:
+            return _cosmos3_real_shapes(task, stage, plan)
         try:
             from chameleon.deploy.cosmos3.paths import resolve_build_cfg_path as resolve_cosmos3_build_cfg
             from chameleon.deploy.cosmos3.paths import resolve_cosmos3_paths

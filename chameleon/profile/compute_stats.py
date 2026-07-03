@@ -15,6 +15,7 @@ from chameleon.deploy.paths import resolve_deploy_paths
 from chameleon.deploy.pi05.stats import prepare_pi05_stage
 from chameleon.profile.counters import StatsResult, StatsTotals, aggregate_stats, count_stage
 from chameleon.profile.execution_plan import ExecutionPlan, PlanMode, build_execution_plan
+from chameleon.profile.cosmos3_real_stats import prepare_real_cosmos3_stage
 from chameleon.profile.reference_stats import prepare_reference_stage
 from chameleon.profile.shape_resolver import (
     precision_to_dtype_bytes,
@@ -78,9 +79,14 @@ def stats_infer(
         for sr in plan.stages:
             shapes = resolve_stage_shapes(task, sr.stage, plan)
             shapes_map[sr.stage] = shapes_summary(shapes)
-            module, inputs = prepare_reference_stage(
-                adapter, sr.stage, shapes, plan=plan, device=stats_device
-            )
+            if getattr(adapter, "_is_real_diffusers", False):
+                module, inputs = prepare_real_cosmos3_stage(
+                    adapter, sr.stage, task, device=stats_device
+                )
+            else:
+                module, inputs = prepare_reference_stage(
+                    adapter, sr.stage, shapes, plan=plan, device=stats_device
+                )
             stage_stats.append(
                 count_stage(
                     stage=sr.stage,
