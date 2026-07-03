@@ -1,0 +1,43 @@
+# Cosmos3 真实权重 — Jetson Thor 边缘 stats 配置（小分辨率 / 少步数）。
+#
+# 用途：在 Thor 上估算 Cosmos3-Nano 四阶段 MACs/FLOPs；比 cosmos3_video_realweights.yaml
+# 小很多，避免 720p×189 帧 + 16B MoT 在 edge GPU 上跑数十分钟。
+#
+# 运行（理论统计，较快）：
+#   chameleon stats --config configs/cosmos3_stats_thor.yaml
+#
+# 运行（含 CUDA profiler 校验，仍比全尺寸快一个数量级）：
+#   chameleon stats --config configs/cosmos3_stats_thor.yaml --measured
+#
+# 全尺寸 720p 部署统计请用 configs/cosmos3_video_realweights.yaml（建议 datacenter GPU）。
+
+architecture: cosmos3
+model: cosmos3
+platform: nvidia_thor
+output_dir: output/cosmos3_stats_thor
+
+actions: []
+
+model_overrides:
+  use_reference: false
+  checkpoint: ~/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
+  precision: bfloat16
+  mode: video
+  enable_safety_checker: false
+
+generate:
+  mode: video
+  prompt: "A robot arm picks up a red cube on a wooden table."
+  num_frames: 33
+  height: 480
+  width: 848
+  fps: 24.0
+  num_inference_steps: 4
+  guidance_scale: 6.0
+  enable_sound: false
+  output_type: pt
+
+infer:
+  batch_size: 1
+  num_steps: 4
+  torch_device: cuda

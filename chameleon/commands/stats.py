@@ -31,6 +31,11 @@ def stats_cli(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also run torch.profiler on CUDA for validation (requires GPU).",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress per-stage progress on stderr.",
+    )
     args = parser.parse_args(argv)
     configure_logging(verbose=args.verbose)
 
@@ -45,7 +50,7 @@ def stats_cli(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        result = stats_infer(task, measured=args.measured)
+        result = stats_infer(task, measured=args.measured, progress=not args.quiet)
     except RuntimeError as exc:
         print(f"stats failed: {exc}", file=sys.stderr)
         return 1

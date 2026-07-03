@@ -239,8 +239,14 @@ def count_stage(
     dtype_bytes: int,
     device: str = "cpu",
     measured: bool = False,
+    on_progress: Callable[[str], None] | None = None,
 ) -> StageStats:
     """对单次 stage forward 统计 MACs/FLOPs 与理论访存。"""
+
+    def _report(msg: str) -> None:
+        if on_progress is not None:
+            on_progress(msg)
+
     module = module.eval()
     if device != "cpu":
         module = module.to(device)
@@ -251,11 +257,13 @@ def count_stage(
     def _run() -> Any:
         return module(*inputs)
 
+    _report("counting theoretical FLOPs")
     flops = _count_flops_forward(module, _run)
     macs = flops // 2
 
     weight_bytes = _count_parameters(module) * dtype_bytes
     activation_bytes = _activation_bytes_from_tensors(inputs, dtype_bytes) * 2
+    _report("counting activation traffic")
     with torch.inference_mode():
         outputs = _run()
     if isinstance(outputs, torch.Tensor):
@@ -266,7 +274,10 @@ def count_stage(
     attention_bytes = estimate_attention_bytes(shapes, dtype_bytes)
     total_bytes = weight_bytes + activation_bytes + attention_bytes
 
-    measured_stats = _measure_with_profiler(module, _run, device) if measured else None
+    measured_stats = None
+    if measured:
+        _report("running CUDA profiler (--measured)")
+        measured_stats = _measure_with_profiler(module, _run, device)
 
     return StageStats(
         stage=stage,

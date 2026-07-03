@@ -71,6 +71,7 @@ import pytest
     [
         "cosmos3_cpu.yaml",
         "cosmos3_video_realweights.yaml",
+        "cosmos3_stats_thor.yaml",
         "cosmos3_action_realweights.yaml",
         "cosmos3_trt_deploy.yaml",
     ],

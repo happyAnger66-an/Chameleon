@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +31,11 @@ from chameleon.profile.units import format_bytes, format_ops, pick_bytes_column_
 logger = logging.getLogger(__name__)
 
 
+def _stats_progress(msg: str, *, enabled: bool) -> None:
+    if enabled:
+        print(msg, file=sys.stderr, flush=True)
+
+
 def _resolve_stats_device(task: TaskConfig, *, measured: bool) -> str:
     requested = task.infer.torch_device or "cpu"
     if measured and requested.startswith("cuda") and torch.cuda.is_available():
@@ -44,6 +52,7 @@ def stats_infer(
     *,
     measured: bool = False,
     device: str | None = None,
+    progress: bool = True,
 ) -> StatsResult:
     plan = build_execution_plan(task)
     precision = resolve_precision(task)
@@ -63,9 +72,27 @@ def stats_infer(
 
     stage_stats = []
     shapes_map: dict[str, dict[str, list[int]]] = {}
+    total_stages = len(plan.stages)
+
+    def _stage_progress_factory(index: int, stage_name: str) -> Callable[[str], None]:
+        prefix = f"[stats {index}/{total_stages}] {stage_name}"
+
+        def _report(substep: str) -> None:
+            _stats_progress(f"{prefix}: {substep}...", enabled=progress)
+
+        return _report
 
     if plan.mode == PlanMode.REFERENCE or task.architecture == "cosmos3":
+        _stats_progress(
+            f"Loading model adapter (device={stats_device}, measured={measured})...",
+            enabled=progress,
+        )
+        t0 = time.perf_counter()
         adapter = build_adapter(task, device=stats_device)
+        _stats_progress(
+            f"Model adapter ready in {time.perf_counter() - t0:.1f}s",
+            enabled=progress,
+        )
         if (
             task.architecture == "cosmos3"
             and not bool(task.model_overrides.get("use_reference", True))
@@ -76,9 +103,15 @@ def stats_infer(
                 "stats use reference surrogate (~0.68M params, not 16B/64B). "
                 "Install diffusers with Cosmos3OmniPipeline support: pip install -e '.[cosmos3]'."
             )
-        for sr in plan.stages:
+        for idx, sr in enumerate(plan.stages, start=1):
             shapes = resolve_stage_shapes(task, sr.stage, plan)
             shapes_map[sr.stage] = shapes_summary(shapes)
+            _stats_progress(
+                f"[stats {idx}/{total_stages}] {sr.stage} (repeat×{sr.repeat}, "
+                f"device={stats_device}): preparing inputs...",
+                enabled=progress,
+            )
+            t_stage = time.perf_counter()
             if getattr(adapter, "_is_real_diffusers", False):
                 module, inputs = prepare_real_cosmos3_stage(
                     adapter, sr.stage, task, device=stats_device
@@ -97,7 +130,13 @@ def stats_infer(
                     dtype_bytes=dtype_bytes,
                     device=stats_device,
                     measured=measured,
+                    on_progress=_stage_progress_factory(idx, sr.stage),
                 )
+            )
+            _stats_progress(
+                f"[stats {idx}/{total_stages}] {sr.stage}: done in "
+                f"{time.perf_counter() - t_stage:.1f}s",
+                enabled=progress,
             )
     else:
         from chameleon.deploy.pi05.loader import load_pi05_model
@@ -115,9 +154,14 @@ def stats_infer(
             ) from exc
 
         try:
-            for sr in plan.stages:
+            for idx, sr in enumerate(plan.stages, start=1):
                 shapes = resolve_stage_shapes(task, sr.stage, plan)
                 shapes_map[sr.stage] = shapes_summary(shapes)
+                _stats_progress(
+                    f"[stats {idx}/{total_stages}] {sr.stage} (repeat×{sr.repeat}): preparing...",
+                    enabled=progress,
+                )
+                t_stage = time.perf_counter()
                 module, inputs = prepare_pi05_stage(
                     sr.stage,
                     pi05_model,
@@ -135,7 +179,13 @@ def stats_infer(
                         dtype_bytes=dtype_bytes,
                         device=stats_device,
                         measured=measured,
+                        on_progress=_stage_progress_factory(idx, sr.stage),
                     )
+                )
+                _stats_progress(
+                    f"[stats {idx}/{total_stages}] {sr.stage}: done in "
+                    f"{time.perf_counter() - t_stage:.1f}s",
+                    enabled=progress,
                 )
         finally:
             del pi05_model
