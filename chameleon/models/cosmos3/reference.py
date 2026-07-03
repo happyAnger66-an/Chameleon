@@ -66,6 +66,9 @@ class Cosmos3Config:
     checkpoint: str | None = None
     model_id: str = "nvidia/Cosmos3-Nano"
     precision: str = "bfloat16"
+    # diffusers Cosmos3OmniPipeline enables cosmos_guardrail by default; disable for
+    # local stats/infer unless ``pip install cosmos_guardrail`` is available.
+    enable_safety_checker: bool = False
 
     @property
     def num_video_tokens(self) -> int:

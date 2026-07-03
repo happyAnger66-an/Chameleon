@@ -87,7 +87,11 @@ class Cosmos3Adapter(ModelAdapter):
 
             dtype = torch.bfloat16 if self.config.precision == "bfloat16" else torch.float32
             source = self.config.checkpoint or self.config.model_id
-            pipe = Cosmos3OmniPipeline.from_pretrained(source, torch_dtype=dtype)
+            pipe = Cosmos3OmniPipeline.from_pretrained(
+                source,
+                torch_dtype=dtype,
+                enable_safety_checker=self.config.enable_safety_checker,
+            )
             pipe = pipe.to(device)
             self.pipeline = pipe
             self._is_real_diffusers = True

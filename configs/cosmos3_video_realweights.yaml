@@ -13,9 +13,11 @@ actions:
 model_overrides:
   use_reference: false
 #  model_id: nvidia/Cosmos3-Nano
-  checkpoint: ~/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
+  checkpoint: /root/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
   precision: bfloat16
   mode: video
+  # 本地 stats/infer 默认关闭；生产环境需 pip install cosmos_guardrail 后设为 true
+  enable_safety_checker: false
 
 generate:
   mode: video
