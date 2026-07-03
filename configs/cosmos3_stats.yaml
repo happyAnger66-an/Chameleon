@@ -1,0 +1,34 @@
+# Cosmos3 reference 计算量 / 访存量统计（小尺寸 MoT surrogate，~0.68M 参数）。
+#
+# 用途：估算 cosmos3 四阶段流水线（vae_encode / text_embed / dit×N / vae_decode）
+# 的 MACs/FLOPs 与理论访存。无需 diffusers 权重，CPU 即可跑 theoretical。
+#
+# 真实 16B/64B Cosmos3 统计需 diffusers 支持 Cosmos3OmniPipeline：
+#   pip install -e ".[cosmos3]"   # diffusers>=0.32 且含 Cosmos3OmniPipeline
+# 然后使用 cosmos3_video_realweights.yaml + --measured（torch_device: cuda）。
+#
+# 运行：
+#   chameleon stats --config configs/cosmos3_stats.yaml
+#   chameleon stats --config configs/cosmos3_stats.yaml --format json --output output/cosmos3_stats/stats.json
+
+architecture: cosmos3
+model: cosmos3
+platform: generic_cpu
+output_dir: output/cosmos3_stats
+
+actions: []
+
+model_overrides:
+  use_reference: true
+  mode: video
+  precision: bfloat16
+
+generate:
+  mode: video
+  num_inference_steps: 35
+  guidance_scale: 6.0
+
+infer:
+  batch_size: 1
+  num_steps: 35
+  torch_device: cpu

@@ -50,6 +50,53 @@ def test_reference_plan_three_stages() -> None:
     ]
 
 
+def test_cosmos3_reference_plan_four_stages() -> None:
+    task = TaskConfig(
+        architecture="cosmos3",
+        model_overrides={"use_reference": True},
+        infer={"num_steps": 6, "batch_size": 1},
+    )
+    plan = build_execution_plan(task)
+    assert plan.mode == PlanMode.REFERENCE
+    assert [(s.stage, s.repeat) for s in plan.stages] == [
+        ("vae_encode", 1),
+        ("text_embed", 1),
+        ("dit", 6),
+        ("vae_decode", 1),
+    ]
+
+
+def test_cosmos3_real_plan_uses_generate_steps() -> None:
+    task = TaskConfig(
+        architecture="cosmos3",
+        model_overrides={"use_reference": False, "model_id": "nvidia/Cosmos3-Nano"},
+        generate={"num_inference_steps": 35},
+        infer={"batch_size": 1},
+    )
+    plan = build_execution_plan(task)
+    assert plan.mode == PlanMode.REAL
+    assert plan.num_steps == 35
+    assert [s.stage for s in plan.stages] == ["vae_encode", "text_embed", "dit", "vae_decode"]
+    assert plan.stages[2].repeat == 35
+
+
+def test_cosmos3_deploy_plan() -> None:
+    task = TaskConfig(
+        architecture="cosmos3",
+        deploy={"backend": "cosmos3"},
+        export=[
+            ExportStep(stage="vae_encode"),
+            ExportStep(stage="text_embed"),
+            ExportStep(stage="dit"),
+            ExportStep(stage="vae_decode"),
+        ],
+        infer={"num_steps": 6},
+    )
+    plan = build_execution_plan(task)
+    assert plan.mode == PlanMode.DEPLOY
+    assert [s.stage for s in plan.stages] == ["vae_encode", "text_embed", "dit", "vae_decode"]
+
+
 def test_real_plan_matches_deploy_stages() -> None:
     task = TaskConfig(
         model_overrides={"use_reference": False, "checkpoint": "models/x/model.safetensors"},

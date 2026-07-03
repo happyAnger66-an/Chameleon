@@ -31,6 +31,40 @@ def test_stats_infer_reference_cpu() -> None:
     assert "measured" not in payload["stages"][0]
 
 
+def test_stats_infer_cosmos3_reference_cpu() -> None:
+    task = TaskConfig(
+        architecture="cosmos3",
+        model="cosmos3",
+        model_overrides={"use_reference": True, "mode": "video"},
+        infer={"num_steps": 3, "batch_size": 1},
+    )
+    result = stats_infer(task, measured=False, device="cpu")
+    assert result.mode == "reference"
+    assert [s.stage for s in result.stages] == [
+        "vae_encode",
+        "text_embed",
+        "dit",
+        "vae_decode",
+    ]
+    assert result.stages[2].repeat == 3
+    assert result.totals.flops > 0
+    assert "dit" in result.execution_plan
+
+
+def test_stats_infer_cosmos3_real_falls_back_without_diffusers() -> None:
+    task = TaskConfig(
+        architecture="cosmos3",
+        model="cosmos3",
+        model_overrides={"use_reference": False, "model_id": "nvidia/Cosmos3-Nano"},
+        generate={"num_inference_steps": 4, "mode": "video"},
+        infer={"batch_size": 1},
+    )
+    result = stats_infer(task, measured=False, device="cpu")
+    assert result.mode == "real"
+    assert len(result.stages) == 4
+    assert any("diffusers pipeline unavailable" in w for w in result.warnings)
+
+
 def test_measured_dict_includes_memory_comparison() -> None:
     from chameleon.profile.compute_stats import _measured_dict
     from chameleon.profile.counters import MeasuredStats, StageStats

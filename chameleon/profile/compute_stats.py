@@ -63,8 +63,18 @@ def stats_infer(
     stage_stats = []
     shapes_map: dict[str, dict[str, list[int]]] = {}
 
-    if plan.mode == PlanMode.REFERENCE:
-        adapter = build_adapter(task, device="cpu")
+    if plan.mode == PlanMode.REFERENCE or task.architecture == "cosmos3":
+        adapter = build_adapter(task, device=stats_device)
+        if (
+            task.architecture == "cosmos3"
+            and not bool(task.model_overrides.get("use_reference", True))
+            and not getattr(adapter, "_is_real_diffusers", False)
+        ):
+            result.warnings.append(
+                "cosmos3 real weights requested but diffusers pipeline unavailable; "
+                "stats use reference surrogate (~0.68M params, not 16B/64B). "
+                "Install diffusers with Cosmos3OmniPipeline support: pip install -e '.[cosmos3]'."
+            )
         for sr in plan.stages:
             shapes = resolve_stage_shapes(task, sr.stage, plan)
             shapes_map[sr.stage] = shapes_summary(shapes)

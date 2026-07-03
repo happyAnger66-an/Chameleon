@@ -6,6 +6,11 @@ from typing import Any
 
 from chameleon.config.schema import TaskConfig
 from chameleon.deploy.build_cfg import load_build_cfg
+from chameleon.deploy.cosmos3.shapes import (
+    COSMOS3_ACTION_HORIZON,
+    COSMOS3_TEXT_PREFIX_LEN,
+    COSMOS3_VIDEO_TOKENS,
+)
 from chameleon.deploy.paths import resolve_build_cfg_path, resolve_deploy_paths
 from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
 from chameleon.profile.execution_plan import ExecutionPlan, PlanMode
@@ -63,6 +68,49 @@ def _reference_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict
     raise KeyError(f"Unknown reference stage {stage!r}.")
 
 
+def _cosmos3_cfg_values(task: TaskConfig) -> dict[str, int | str]:
+    cfg = task.model_overrides
+    mode = str(cfg.get("mode") or getattr(task.generate, "mode", None) or "video")
+    return {
+        "mode": mode,
+        "batch": task.infer.batch_size,
+        "image_channels": int(cfg.get("image_channels", 3)),
+        "image_size": int(cfg.get("image_size", 64)),
+        "max_lang_len": int(cfg.get("max_lang_len", COSMOS3_TEXT_PREFIX_LEN)),
+        "vocab_size": int(cfg.get("vocab_size", 1024)),
+        "num_video_tokens": int(cfg.get("num_video_tokens", COSMOS3_VIDEO_TOKENS)),
+        "action_horizon": int(cfg.get("action_horizon", COSMOS3_ACTION_HORIZON)),
+        "action_dim": int(cfg.get("action_dim", 32)),
+        "hidden_size": int(cfg.get("hidden_size", 128)),
+        "token_dim": int(cfg.get("action_dim", 32)),
+    }
+
+
+def _cosmos3_reference_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict[str, tuple[int, ...]]:
+    c = _cosmos3_cfg_values(task)
+    batch = plan.batch_size
+    if stage == "vae_encode":
+        return {"cond_pixels": (batch, c["image_channels"], c["image_size"], c["image_size"])}
+    if stage == "text_embed":
+        return {"lang_tokens": (batch, c["max_lang_len"])}
+    if stage == "dit":
+        gen_tokens = c["action_horizon"] if c["mode"] == "action" else c["num_video_tokens"]
+        return {
+            "text_mem": (batch, c["max_lang_len"], c["hidden_size"]),
+            "cond_latent": (batch, c["num_video_tokens"], c["token_dim"]),
+            "x_t": (batch, gen_tokens, c["token_dim"]),
+            "time_emb": (batch, c["hidden_size"]),
+        }
+    if stage == "vae_decode":
+        return {"latent": (batch, c["num_video_tokens"], c["token_dim"])}
+    raise KeyError(f"Unknown cosmos3 reference stage {stage!r}.")
+
+
+def _cosmos3_default_deploy_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict[str, tuple[int, ...]]:
+    # Deploy build_cfg defaults mirror reference small MoT profile.
+    return _cosmos3_reference_shapes(task, stage, plan)
+
+
 def _default_deploy_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict[str, tuple[int, ...]]:
     batch = plan.batch_size
     action_dim = int(task.model_overrides.get("action_dim", 32))
@@ -101,6 +149,23 @@ def _default_deploy_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) ->
 
 
 def resolve_stage_shapes(task: TaskConfig, stage: str, plan: ExecutionPlan) -> dict[str, tuple[int, ...]]:
+    if task.architecture == "cosmos3":
+        if plan.mode == PlanMode.REFERENCE:
+            return _cosmos3_reference_shapes(task, stage, plan)
+        try:
+            from chameleon.deploy.cosmos3.paths import resolve_build_cfg_path as resolve_cosmos3_build_cfg
+            from chameleon.deploy.cosmos3.paths import resolve_cosmos3_paths
+
+            paths = resolve_cosmos3_paths(task)
+            cfg_path = resolve_cosmos3_build_cfg(task, stage, paths)
+            cfg = load_build_cfg(cfg_path)
+            opt = cfg.get("opt_shapes")
+            if isinstance(opt, dict) and opt:
+                return {k: tuple(v) for k, v in opt.items()}
+        except (FileNotFoundError, KeyError, ValueError, ImportError):
+            pass
+        return _cosmos3_default_deploy_shapes(task, stage, plan)
+
     if plan.mode == PlanMode.REFERENCE:
         return _reference_shapes(task, stage, plan)
 
