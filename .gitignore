@@ -63,7 +63,7 @@ tmp/
 *.bin
 chameleon_manifest.json
 
-# Weights / checkpoints / calibration data
+# Weights / checkpoints / calibration data (repo-root dirs only; not chameleon/quantization/calibrate/)
 *.pt
 *.pth
 *.safetensors
@@ -72,8 +72,8 @@ chameleon_manifest.json
 *.npy
 params_shard_*.bin
 tensor-cache.json
-calibrate/
-calibration/
+/calibrate/
+/calibration/
 
 # TensorRT / ONNX / plugin build artifacts
 *.so.dbg
