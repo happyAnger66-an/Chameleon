@@ -10,6 +10,8 @@
 
 from chameleon.evaluate.chameleon_runner import ChameleonOrchestratorRunner
 from chameleon.evaluate.cosmos3_runner import Cosmos3PolicyRunner
+from chameleon.evaluate.cosmos3_pt_trt_compare_runner import Cosmos3PtTrtCompareRunner
+from chameleon.evaluate.cosmos3_trt_runner import Cosmos3TrtPolicyRunner
 from chameleon.evaluate.pt_trt_compare_runner import Pi05PtTrtCompareRunner
 from chameleon.evaluate.trt_only_runner import Pi05TrtOnlyRunner
 from chameleon.evaluate.compare import ActionDiff, compare_actions
@@ -36,6 +38,8 @@ __all__ = [
     "OpenPiPolicyRunner",
     "ChameleonOrchestratorRunner",
     "Cosmos3PolicyRunner",
+    "Cosmos3PtTrtCompareRunner",
+    "Cosmos3TrtPolicyRunner",
     "Pi05PtTrtCompareRunner",
     "Pi05TrtOnlyRunner",
     "evaluate_lerobot",

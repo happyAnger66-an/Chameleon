@@ -53,9 +53,20 @@ def run_cosmos3_export(task: TaskConfig, manifest) -> dict[str, Artifact]:
             )
 
     # cosmos3 reference modules are ONNX-traceable on CPU; real diffusers submodules
-    # may require CUDA — honour the configured infer device for those.
-    device = "cpu"
+    # (16B MoT + Wan VAE) require CUDA — honour the configured infer device for those.
+    use_reference = bool(task.model_overrides.get("use_reference", True))
+    if use_reference:
+        device = "cpu"
+    else:
+        device = task.infer.torch_device or "cuda"
     adapter = load_cosmos3_adapter(task, device=device)
+    is_real = bool(getattr(adapter, "_is_real_diffusers", False))
+    logger.info(
+        "cosmos3 export path: reference=%s device=%s (requested use_reference=%s)",
+        adapter.config.use_reference,
+        device,
+        use_reference,
+    )
 
     stage_options = {step.stage: dict(step.options) for step in steps}
     exported = export_cosmos3_stages(

@@ -31,6 +31,15 @@ DEFAULT_BUILD_CFGS: dict[str, str] = {
     "vae_decode": "cosmos3_vae_decode_build_cfg.py",
 }
 
+# 真实权重固定 profile build_cfg（use_reference=false 时的 fallback；compile step
+# options.build_cfg 优先）。dit → dit_step（含动态 latent/timestep 输入）。
+POLICY_DROID_BUILD_CFGS: dict[str, str] = {
+    "vae_encode": "cosmos3_policy_droid_vae_encode_build_cfg.py",
+    "text_embed": "cosmos3_policy_droid_text_embed_build_cfg.py",
+    "dit": "cosmos3_policy_droid_dit_step_build_cfg.py",
+    "vae_decode": "cosmos3_policy_droid_vae_decode_build_cfg.py",
+}
+
 
 def _chameleon_project_root() -> Path:
     # chameleon/deploy/cosmos3/paths.py -> Chamleon/
@@ -79,8 +88,15 @@ def stage_engine_path(paths: Cosmos3DeployPaths, stage: str) -> Path:
     return paths.engine_dir / name
 
 
+def _profile_default_build_cfgs(task: TaskConfig) -> dict[str, str]:
+    """真实权重路径缺省用固定 profile build_cfg；reference 路径用小尺寸默认。"""
+    if not bool(task.model_overrides.get("use_reference", True)):
+        return POLICY_DROID_BUILD_CFGS
+    return DEFAULT_BUILD_CFGS
+
+
 def resolve_build_cfg_path(task: TaskConfig, stage: str, paths: Cosmos3DeployPaths) -> Path:
-    rel = task.deploy.build_cfgs.get(stage) or DEFAULT_BUILD_CFGS.get(stage)
+    rel = task.deploy.build_cfgs.get(stage) or _profile_default_build_cfgs(task).get(stage)
     if not rel:
         raise KeyError(f"No default build_cfg for cosmos3 stage {stage!r}; set deploy.build_cfgs.")
     raw = Path(rel)

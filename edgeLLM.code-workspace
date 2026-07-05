@@ -50,6 +50,9 @@
 		},
 		{
 			"path": "../mlc-vla"
+		},
+		{
+			"path": "../FlashRT"
 		}
 	],
 	"settings": {}

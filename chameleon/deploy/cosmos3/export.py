@@ -24,6 +24,11 @@ _EXPORTERS: dict[str, Callable[..., Path]] = {
 }
 
 
+def _use_real_export(adapter) -> bool:
+    """真实 diffusers 权重（use_reference=false 且 pipeline 已加载）走 real exporters。"""
+    return bool(getattr(adapter, "_is_real_diffusers", False)) and not adapter.config.use_reference
+
+
 def export_stage(
     stage: str,
     *,
@@ -32,6 +37,15 @@ def export_stage(
     device: str = "cpu",
     options: dict[str, Any] | None = None,
 ) -> Path:
+    if _use_real_export(adapter):
+        from chameleon.deploy.cosmos3.real.export_stages import REAL_EXPORTERS
+
+        if stage not in REAL_EXPORTERS:
+            raise KeyError(
+                f"Unknown cosmos3 real export stage {stage!r}; expected one of {sorted(REAL_EXPORTERS)}."
+            )
+        return REAL_EXPORTERS[stage](adapter, export_dir, device=device, **(options or {}))
+
     if stage not in _EXPORTERS:
         raise KeyError(f"Unknown cosmos3 export stage {stage!r}; expected one of {COSMOS3_STAGES}.")
     exporter = _EXPORTERS[stage]

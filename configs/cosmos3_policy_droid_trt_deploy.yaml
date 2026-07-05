@@ -1,0 +1,93 @@
+# Cosmos3-Nano-Policy-DROID — 真实权重 → ONNX 导出 → TensorRT engine 构建（v1: bf16 固定 profile）。
+#
+# 固定 profile 见 chameleon/deploy/cosmos3/shapes.py: POLICY_DROID（chunk16 / 17 帧 / 480 tier /
+# guidance=1）。改任一 shape 须重新 export + build 全部 4 个 stage engine。
+# 需 diffusers cosmos3 权重 + CUDA（导出）+ TensorRT（build）。
+#
+# 仅打印计划：
+#   PYTHONPATH=. python -m chameleon.cli workflow --config configs/cosmos3_policy_droid_trt_deploy.yaml --dry-run
+# 导出 + build（需 GPU + TensorRT）：
+#   PYTHONPATH=. python -m chameleon.cli workflow --config configs/cosmos3_policy_droid_trt_deploy.yaml
+
+architecture: cosmos3
+model: cosmos3_nano
+platform: nvidia_ada
+output_dir: output/cosmos3_policy_droid_trt
+
+actions:
+  - export
+  - compile
+  - trt_profile
+
+model_overrides:
+  use_reference: false
+  model_id: nvidia/Cosmos3-Nano-Policy-DROID
+  precision: bfloat16
+  mode: action
+  action_dim: 32
+  action_horizon: 16
+  enable_safety_checker: false
+
+generate:
+  mode: action
+  prompt: "Pick up the object and place it at the target location."
+  num_inference_steps: 30
+  guidance_scale: 1.0
+  output_type: pt
+  action:
+    mode: policy
+    chunk_size: 16
+    domain_name: droid_lerobot
+    resolution_tier: 480
+    view_point: ego_view
+
+deploy:
+  backend: cosmos3
+  export_dir: output/cosmos3_policy_droid_trt/onnx
+  engine_dir: output/cosmos3_policy_droid_trt/engines
+  use_cudagraph: false
+
+export:
+  - stage: vae_encode
+    options:
+      profile: policy_droid
+  - stage: text_embed
+    options:
+      profile: policy_droid
+  - stage: dit
+    options:
+      profile: policy_droid
+  - stage: vae_decode
+    options:
+      profile: policy_droid
+
+compile:
+  - stage: vae_encode
+    options:
+      build_cfg: configs/build_configs/cosmos3_policy_droid_vae_encode_build_cfg.py
+  - stage: text_embed
+    options:
+      build_cfg: configs/build_configs/cosmos3_policy_droid_text_embed_build_cfg.py
+  - stage: dit
+    options:
+      build_cfg: configs/build_configs/cosmos3_policy_droid_dit_step_build_cfg.py
+  - stage: vae_decode
+    options:
+      build_cfg: configs/build_configs/cosmos3_policy_droid_vae_decode_build_cfg.py
+
+trt_profile:
+  - stage: vae_encode
+  - stage: text_embed
+  - stage: dit
+  - stage: vae_decode
+
+profile:
+  profile_dir: output/cosmos3_policy_droid_trt/profiles
+  iterations: 30
+  viewer: static
+
+infer:
+  batch_size: 1
+  num_steps: 30
+  use_compiled_engines: false
+  torch_device: cuda

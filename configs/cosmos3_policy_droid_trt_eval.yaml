@@ -1,0 +1,45 @@
+# Cosmos3-Nano-Policy-DROID — TRT-only 策略推理评测（host diffusers + TRT engine）。
+#
+# 前置：先用 configs/cosmos3_policy_droid_trt_deploy.yaml 完成 export + compile，
+# 生成 4 个 engine 到 output/cosmos3_policy_droid_trt/engines。
+# 运行：
+#   PYTHONPATH=. python -m chameleon.cli eval --config configs/cosmos3_policy_droid_trt_eval.yaml
+
+architecture: cosmos3
+model: cosmos3_nano
+platform: nvidia_ada
+output_dir: output/cosmos3_policy_droid_trt
+
+actions:
+  - eval
+
+model_overrides:
+  use_reference: false
+  model_id: nvidia/Cosmos3-Nano-Policy-DROID
+  precision: bfloat16
+  mode: action
+  trt_profile: policy_droid
+
+generate:
+  mode: action
+  prompt: "Pick up the object and place it at the target location."
+  guidance_scale: 1.0
+  action:
+    mode: policy
+    chunk_size: 16
+    domain_name: droid_lerobot
+    resolution_tier: 480
+    view_point: ego_view
+
+deploy:
+  backend: cosmos3
+  engine_dir: output/cosmos3_policy_droid_trt/engines
+
+evaluate:
+  policy_runner: cosmos3_trt_only
+  compare_mode: false
+
+infer:
+  batch_size: 1
+  num_steps: 30
+  torch_device: cuda

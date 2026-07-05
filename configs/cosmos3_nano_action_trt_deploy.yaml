@@ -1,0 +1,94 @@
+# Cosmos3-Nano action（bridge domain）— 真实权重 → ONNX → TensorRT（v1: bf16, guidance=1）。
+#
+# 复用 Policy-DROID 的同一套 export / build 代码，仅 profile（NANO_ACTION）与 build_cfg 不同。
+# 固定 profile 见 chameleon/deploy/cosmos3/shapes.py: NANO_ACTION。
+#
+# 注意：Nano action 训练默认 guidance_scale=6（CFG）；v1 先按 guidance=1 单路 dit 跑通 smoke，
+# CFG（cond/uncond 双 forward 或双输入 dit）列为 v2，见 docs/models/cosmos3_trt_deploy.md。
+#
+# 运行：
+#   PYTHONPATH=. python -m chameleon.cli workflow --config configs/cosmos3_nano_action_trt_deploy.yaml
+
+architecture: cosmos3
+model: cosmos3_nano
+platform: nvidia_ada
+output_dir: output/cosmos3_nano_action_trt
+
+actions:
+  - export
+  - compile
+  - trt_profile
+
+model_overrides:
+  use_reference: false
+  model_id: nvidia/Cosmos3-Nano
+  precision: bfloat16
+  mode: action
+  action_dim: 32
+  action_horizon: 16
+  trt_profile: nano_action
+  enable_safety_checker: false
+
+generate:
+  mode: action
+  prompt: "Pick up the cup and place it on the plate."
+  num_inference_steps: 35
+  guidance_scale: 1.0
+  output_type: pt
+  action:
+    mode: policy
+    chunk_size: 16
+    domain_name: bridge_orig_lerobot
+    resolution_tier: 480
+    view_point: ego_view
+
+deploy:
+  backend: cosmos3
+  export_dir: output/cosmos3_nano_action_trt/onnx
+  engine_dir: output/cosmos3_nano_action_trt/engines
+  use_cudagraph: false
+
+export:
+  - stage: vae_encode
+    options:
+      profile: nano_action
+  - stage: text_embed
+    options:
+      profile: nano_action
+  - stage: dit
+    options:
+      profile: nano_action
+  - stage: vae_decode
+    options:
+      profile: nano_action
+
+compile:
+  - stage: vae_encode
+    options:
+      build_cfg: configs/build_configs/cosmos3_nano_action_vae_encode_build_cfg.py
+  - stage: text_embed
+    options:
+      build_cfg: configs/build_configs/cosmos3_nano_action_text_embed_build_cfg.py
+  - stage: dit
+    options:
+      build_cfg: configs/build_configs/cosmos3_nano_action_dit_step_build_cfg.py
+  - stage: vae_decode
+    options:
+      build_cfg: configs/build_configs/cosmos3_nano_action_vae_decode_build_cfg.py
+
+trt_profile:
+  - stage: vae_encode
+  - stage: text_embed
+  - stage: dit
+  - stage: vae_decode
+
+profile:
+  profile_dir: output/cosmos3_nano_action_trt/profiles
+  iterations: 30
+  viewer: static
+
+infer:
+  batch_size: 1
+  num_steps: 35
+  use_compiled_engines: false
+  torch_device: cuda

@@ -123,3 +123,123 @@ class Cosmos3TrtPipeline:
         if mode == "action":
             return x_t
         return _take(self._engines["vae_decode"].run({"latent": x_t}), "video")
+
+
+class Cosmos3PolicyTrtPipeline:
+    """Cosmos3 Policy (action) TRT 去噪内核 — 真实权重、固定 profile、guidance=1。
+
+    与 :class:`Cosmos3TrtPipeline`（reference surrogate）不同，本类对齐真实
+    ``Cosmos3OmniPipeline.__call__`` 的 policy 通路：
+
+    - **host（diffusers pipe）**：tokenize / mRoPE 打包（``build_policy_pack``）、
+      velocity 掩码（``pipe._mask_velocity_predictions``）、UniPC ``scheduler.step``；
+    - **TRT engine**：``vae_encode``（观测→z0）、``dit``（每步 velocity）、
+      可选 ``vae_decode``（rollout 可视化）。
+
+    v1 简化：``guidance_scale=1`` 单路 dit、``enable_sound=False``、固定 profile 全画布
+    latent（不做 padding 移除，保证 engine shape 恒定）。
+    """
+
+    def __init__(
+        self,
+        engines: dict[str, Engine],
+        pipe: Any,
+        profile: Any,
+        *,
+        num_steps: int | None = None,
+    ) -> None:
+        self._engines = engines
+        self._pipe = pipe
+        self._profile = profile
+        self._num_steps = int(num_steps or profile.num_inference_steps)
+
+    @property
+    def num_steps(self) -> int:
+        return self._num_steps
+
+    def _init_latents(self, pack, video: torch.Tensor, dev: torch.device, dtype: torch.dtype):
+        """Host prepare_latents 等价逻辑（固定 profile；vision frame 0 锁 clean，action 全噪声）。"""
+        z0 = _take(self._engines["vae_encode"].run({"video": video}), "vision_latent")
+        z0 = z0.to(device=dev, dtype=dtype)
+        vcm = pack.vision_condition_mask.to(device=dev, dtype=dtype)
+        latents = vcm * z0 + (1.0 - vcm) * torch.randn_like(z0)
+
+        action_dim = int(pack.meta["action_shape"][1])
+        chunk = int(self._profile.chunk_size)
+        action_latents = torch.randn(chunk, action_dim, device=dev, dtype=dtype)
+        action_latents[:, pack.raw_action_dim :] = 0
+        return latents, action_latents
+
+    def infer_policy(
+        self,
+        observation: dict[str, Any],
+        device: str | torch.device,
+        *,
+        num_steps: int | None = None,
+        return_video: bool = False,
+    ) -> torch.Tensor | dict[str, torch.Tensor]:
+        """Run the policy denoise loop; return action chunk ``[chunk, raw_action_dim]``.
+
+        ``observation`` must carry ``video`` = conditioning canvas tensor
+        ``[1, 3, num_frames, canvas_h, canvas_w]`` (already preprocessed to the tier canvas).
+        """
+        import copy
+
+        from chameleon.deploy.cosmos3.real.pack import build_policy_pack
+
+        dev = torch.device(device) if not isinstance(device, torch.device) else device
+        steps = int(num_steps if num_steps is not None else self._num_steps)
+        pipe = self._pipe
+        dtype = pipe.transformer.dtype
+
+        pack = build_policy_pack(pipe, self._profile, device=dev, dtype=dtype)
+        meta = pack.meta
+
+        video = observation["video"].to(device=dev, dtype=dtype)
+        latents, action_latents = self._init_latents(pack, video, dev, dtype)
+
+        vcm = pack.vision_condition_mask.to(device=dev, dtype=dtype)
+        acm = pack.action_condition_mask.to(device=dev, dtype=dtype)
+        nvt = int(meta["num_noisy_vision_tokens"])
+        nat = int(meta["num_noisy_action_tokens"])
+        raw_dim = int(pack.raw_action_dim)
+
+        pipe.scheduler.set_timesteps(steps, device=dev)
+        timesteps = pipe.scheduler.timesteps
+        action_scheduler = copy.deepcopy(pipe.scheduler)
+
+        dit = self._engines["dit"]
+        for t in timesteps:
+            ts = float(t.item())
+            out = dit.run(
+                {
+                    "vision_tokens": latents.to(dtype),
+                    "vision_timesteps": torch.full((nvt,), ts, device=dev),
+                    "action_tokens": action_latents.to(dtype),
+                    "action_timesteps": torch.full((nat,), ts, device=dev),
+                }
+            )
+            v_vision = _take(out, "v_vision")
+            v_action = _take(out, "v_action")
+            cond_v_vision, _cv_sound, cond_v_action = pipe._mask_velocity_predictions(
+                [v_vision],
+                None,
+                vision_condition_mask=[vcm],
+                preds_action=[v_action],
+                action_condition_mask=[acm],
+                raw_action_dim=raw_dim,
+            )
+            latents = pipe.scheduler.step(
+                cond_v_vision.unsqueeze(0), t, latents.unsqueeze(0), return_dict=False
+            )[0].squeeze(0)
+            if cond_v_action is not None:
+                action_latents = action_scheduler.step(
+                    cond_v_action.unsqueeze(0), t, action_latents.unsqueeze(0), return_dict=False
+                )[0].squeeze(0)
+                action_latents[:, raw_dim:] = 0
+
+        action_out = action_latents[:, :raw_dim]
+        if not return_video:
+            return action_out
+        video_out = _take(self._engines["vae_decode"].run({"latent": latents.to(dtype)}), "video")
+        return {"action": action_out, "video": video_out}

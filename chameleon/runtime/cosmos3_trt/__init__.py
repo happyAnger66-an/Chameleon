@@ -8,6 +8,6 @@
     运行时层 — 对照 runtime/pi05_trt/。import 时触发 orchestrator 注册。
 """
 
-from chameleon.runtime.cosmos3_trt.pipeline import Cosmos3TrtPipeline
+from chameleon.runtime.cosmos3_trt.pipeline import Cosmos3PolicyTrtPipeline, Cosmos3TrtPipeline
 
-__all__ = ["Cosmos3TrtPipeline"]
+__all__ = ["Cosmos3PolicyTrtPipeline", "Cosmos3TrtPipeline"]

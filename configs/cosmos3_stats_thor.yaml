@@ -20,7 +20,7 @@ actions: []
 
 model_overrides:
   use_reference: false
-  checkpoint: ~/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
+  checkpoint: /root/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
   precision: bfloat16
   mode: video
   enable_safety_checker: false
