@@ -52,6 +52,7 @@ def _onnx_export(
     dynamic_axes: dict | None,
     opset_version: int = 19,
     dynamo: bool = False,
+    do_constant_folding: bool = True,
 ) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start = time.time()
@@ -66,7 +67,7 @@ def _onnx_export(
             output_names=output_names,
             opset_version=opset_version,
             dynamo=dynamo,
-            do_constant_folding=True,
+            do_constant_folding=do_constant_folding,
             dynamic_axes=dynamic_axes,
         )
     logger.info("cosmos3 real export done in %.1fs (%s)", time.time() - start, out_path.name)
@@ -145,6 +146,10 @@ def export_dit(adapter, export_dir: str | Path, *, device: str = "cuda", **optio
         ex["action_timesteps"],
     )
     # Fixed policy profile → no dynamic axes (seq_len / patch counts are locked).
+    # MoT 的 packing/patchify 辅助里有若干在 CPU 上构造的 index/arange 常量（eager 运行
+    # 时按需搬到 CUDA，但 ONNX 的 _jit_pass_onnx_constant_fold 会因 cuda/cpu 常量混用而
+    # 报 device mismatch）。关掉 ONNX 侧常量折叠即可绕开该 pass；TRT build 时仍会做常量
+    # 折叠，无运行期损失。可用 options.do_constant_folding=true 覆盖。
     return _onnx_export(
         module,
         args,
@@ -153,6 +158,7 @@ def export_dit(adapter, export_dir: str | Path, *, device: str = "cuda", **optio
         output_names=["v_vision", "v_action"],
         dynamic_axes=None,
         dynamo=bool(options.get("dynamo", False)),
+        do_constant_folding=bool(options.get("do_constant_folding", False)),
     )
 
 
