@@ -7,16 +7,15 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import time
 from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F
 
 from chameleon.deploy.cosmos3.real.dit_step import Cosmos3DitStepExport
+from chameleon.deploy.cosmos3.real.onnx_utils import force_cosmos3_export_attention
 from chameleon.deploy.cosmos3.real.pack import build_policy_pack
 from chameleon.deploy.cosmos3.real.vae import WanVaeDecodeExport, WanVaeEncodeExport
 from chameleon.deploy.cosmos3.shapes import Cosmos3Profile, get_profile
@@ -24,40 +23,6 @@ from chameleon.deploy.cosmos3.shapes import Cosmos3Profile, get_profile
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROFILE = "policy_droid"
-
-
-@contextlib.contextmanager
-def _sdpa_gqa_shim():
-    """把 ``scaled_dot_product_attention(enable_gqa=True)`` 改写成手动扩展 KV 头。
-
-    Cosmos3 用 GQA（``num_key_value_heads < num_attention_heads``），diffusers 的
-    native attention 后端会带 ``enable_gqa=True`` 调 SDPA；而 TorchScript ONNX 导出器
-    （symbolic_opset14）对 ``enable_gqa=True`` 直接 assert 失败。GQA 语义等价于「KV 头
-    按 ``n_rep=Hq//Hkv`` repeat_interleave 后普通 SDPA」，故导出期临时打补丁：扩展 KV
-    并去掉该 flag，数值一致且可被 ONNX 转换。不改动已安装的 diffusers 源码。
-    """
-    orig = F.scaled_dot_product_attention
-
-    def _patched(query, key, value, attn_mask=None, dropout_p=0.0,
-                 is_causal=False, scale=None, enable_gqa=False, **kwargs):
-        if enable_gqa:
-            hq = query.shape[-3]
-            hkv = key.shape[-3]
-            if hkv > 0 and hq != hkv and hq % hkv == 0:
-                n_rep = hq // hkv
-                key = key.repeat_interleave(n_rep, dim=-3)
-                value = value.repeat_interleave(n_rep, dim=-3)
-        return orig(
-            query, key, value,
-            attn_mask=attn_mask, dropout_p=dropout_p,
-            is_causal=is_causal, scale=scale, **kwargs,
-        )
-
-    F.scaled_dot_product_attention = _patched
-    try:
-        yield
-    finally:
-        F.scaled_dot_product_attention = orig
 
 
 def _resolve_dtype(adapter) -> torch.dtype:
@@ -91,7 +56,7 @@ def _onnx_export(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start = time.time()
     logger.info("Exporting cosmos3 real -> %s", out_path)
-    with torch.inference_mode(), _sdpa_gqa_shim():
+    with torch.inference_mode(), force_cosmos3_export_attention():
         torch.onnx.export(
             module,
             args,
