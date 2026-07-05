@@ -206,45 +206,20 @@ def run_quantize(task: TaskConfig, adapter: ModelAdapter, manifest: Manifest) ->
 def run_export(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
     """Export ONNX graphs for deployment.
 
-    ``deploy.backend=pi05`` uses Chameleon built-in pi05 stage exporters.
+    Dispatch is table-driven: ``deploy.backend`` resolves to a registered
+    :class:`~chameleon.deploy.registry.DeployBackend` (pi05 / cosmos3 / ...).
+    Adding a new architecture only requires registering a backend — no change here.
     """
-    from chameleon.deploy.backends import is_cosmos3_deploy_backend, is_pi05_deploy_backend
+    from chameleon.deploy.registry import resolve_deploy_backend
 
-    backend = (task.deploy.backend or "reference").strip().lower()
-    if is_pi05_deploy_backend(backend):
-        from chameleon.deploy.pi05_openpi import run_pi05_export
-
-        return run_pi05_export(task, manifest)
-    if is_cosmos3_deploy_backend(backend):
-        from chameleon.deploy.cosmos3_diffusers import run_cosmos3_export
-
-        return run_cosmos3_export(task, manifest)
-    if backend == "reference":
-        raise NotImplementedError(
-            "reference export is handled inside run_compile (capture -> ONNX). "
-            "Use actions: [compile] with deploy.backend=reference, or set "
-            "deploy.backend=pi05 for real pi05 ONNX export."
-        )
-    raise ValueError(f"Unknown deploy.backend {backend!r}.")
+    return resolve_deploy_backend(task.deploy.backend).export(task, manifest)
 
 
 def run_deploy_build(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:
-    """Build TRT engines from exported ONNX (pi05 / cosmos3 deploy path)."""
-    from chameleon.deploy.backends import is_cosmos3_deploy_backend, is_pi05_deploy_backend
+    """Build TRT engines from exported ONNX via the registered deploy backend."""
+    from chameleon.deploy.registry import resolve_deploy_backend
 
-    backend = (task.deploy.backend or "reference").strip().lower()
-    if is_pi05_deploy_backend(backend):
-        from chameleon.deploy.pi05_openpi import run_pi05_build
-
-        return run_pi05_build(task, manifest)
-    if is_cosmos3_deploy_backend(backend):
-        from chameleon.deploy.cosmos3_diffusers import run_cosmos3_build
-
-        return run_cosmos3_build(task, manifest)
-    raise ValueError(
-        f"run_deploy_build requires deploy.backend=pi05|cosmos3 (got {backend!r}). "
-        "Use run_compile for the reference adapter path."
-    )
+    return resolve_deploy_backend(task.deploy.backend).build(task, manifest)
 
 
 def run_trt_profile(task: TaskConfig, manifest: Manifest) -> dict[str, Artifact]:

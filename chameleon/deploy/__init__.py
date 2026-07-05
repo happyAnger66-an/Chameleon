@@ -1,5 +1,6 @@
 """TRT 部署流水线 — pi05 ONNX 导出与 engine 构建。"""
 
+import chameleon.deploy.backends  # noqa: F401  (import-time deploy-backend 注册)
 from chameleon.deploy.pi05.export import PI05_STAGES, export_stage
 from chameleon.deploy.paths import resolve_deploy_paths, stage_engine_path, stage_onnx_path
 from chameleon.deploy.pi05_openpi import (

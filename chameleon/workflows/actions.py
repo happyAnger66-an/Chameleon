@@ -31,7 +31,8 @@ from chameleon.api import (
 from chameleon.config.schema import TaskConfig
 from chameleon.core.artifact import Artifact, Manifest
 from chameleon.core.registry import Registry
-from chameleon.deploy.backends import is_cosmos3_deploy_backend, is_pi05_deploy_backend
+from chameleon.deploy.backends import is_dedicated_deploy_backend
+from chameleon.deploy.registry import deploy_backend_or_none
 from chameleon.deploy.trt_profile import iter_profile_steps
 
 logger = logging.getLogger(__name__)
@@ -118,11 +119,9 @@ class ExportAction(WorkflowAction):
             f"  export:   stage={s.stage} backend={backend}" for s in task.export or []
         ]
         if not task.export:
-            if is_cosmos3_deploy_backend(backend):
-                default_stages = "vae_encode/text_embed/dit/vae_decode"
-            else:
-                default_stages = "vit/llm/expert/denoise"
-            lines.append(f"  export:   default stages {default_stages} -> {export_dir}")
+            be = deploy_backend_or_none(backend)
+            stages = be.default_export_stages if be is not None else ("vit", "llm", "expert", "denoise")
+            lines.append(f"  export:   default stages {'/'.join(stages)} -> {export_dir}")
         return lines
 
     def run(self, ctx: WorkflowContext) -> None:
@@ -138,8 +137,7 @@ class CompileAction(WorkflowAction):
         ]
 
     def run(self, ctx: WorkflowContext) -> None:
-        backend = ctx.task.deploy.backend
-        if is_pi05_deploy_backend(backend) or is_cosmos3_deploy_backend(backend):
+        if is_dedicated_deploy_backend(ctx.task.deploy.backend):
             ctx.compiled_engines = run_deploy_build(ctx.task, ctx.manifest)
         else:
             ctx.compiled_engines = run_compile(ctx.task, ctx.adapter(), ctx.manifest)
