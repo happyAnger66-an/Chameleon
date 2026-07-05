@@ -65,6 +65,36 @@ def _export_dispatch_attention(
 
 
 @contextlib.contextmanager
+def force_nearest_interpolate():
+    """导出期把 ``F.interpolate(mode="nearest-exact")`` 改成 ``mode="nearest"``。
+
+    Wan VAE 解码器的 ``WanUpsample`` 用 ``nn.Upsample(mode="nearest-exact")``，落到
+    ``aten::_upsample_nearest_exact2d`` —— TorchScript ONNX 导出器（opset 19）没有该
+    "exact" 变体的 symbolic，只支持普通 ``nearest``。两者仅差半像素的源采样偏移，对 VAE
+    解码几乎不可见（v1 可接受）。此处只在导出期临时替换 ``torch.nn.functional.interpolate``
+    （``nn.Upsample.forward`` 通过它调用），退出还原；不改动 diffusers 源码。
+    """
+    orig = F.interpolate
+
+    def _patched(input, size=None, scale_factor=None, mode="nearest",
+                 align_corners=None, recompute_scale_factor=None, antialias=False):
+        if mode == "nearest-exact":
+            mode = "nearest"
+            align_corners = None
+        return orig(
+            input, size=size, scale_factor=scale_factor, mode=mode,
+            align_corners=align_corners, recompute_scale_factor=recompute_scale_factor,
+            antialias=antialias,
+        )
+
+    F.interpolate = _patched
+    try:
+        yield
+    finally:
+        F.interpolate = orig
+
+
+@contextlib.contextmanager
 def force_cosmos3_export_attention():
     """导出期把 cosmos3 transformer 的 ``dispatch_attention_fn`` 换成 ONNX 友好等价实现。"""
     try:

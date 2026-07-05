@@ -15,7 +15,10 @@ from typing import Any
 import torch
 
 from chameleon.deploy.cosmos3.real.dit_step import Cosmos3DitStepExport
-from chameleon.deploy.cosmos3.real.onnx_utils import force_cosmos3_export_attention
+from chameleon.deploy.cosmos3.real.onnx_utils import (
+    force_cosmos3_export_attention,
+    force_nearest_interpolate,
+)
 from chameleon.deploy.cosmos3.real.pack import build_policy_pack
 from chameleon.deploy.cosmos3.real.vae import WanVaeDecodeExport, WanVaeEncodeExport
 from chameleon.deploy.cosmos3.shapes import Cosmos3Profile, get_profile
@@ -57,7 +60,7 @@ def _onnx_export(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     start = time.time()
     logger.info("Exporting cosmos3 real -> %s", out_path)
-    with torch.inference_mode(), force_cosmos3_export_attention():
+    with torch.inference_mode(), force_cosmos3_export_attention(), force_nearest_interpolate():
         torch.onnx.export(
             module,
             args,
