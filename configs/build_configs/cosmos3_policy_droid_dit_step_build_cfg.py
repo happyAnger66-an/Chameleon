@@ -9,17 +9,9 @@
 #   action_timesteps [num_noisy_action_tokens]
 # 输出 v_vision / v_action 为 flow velocity（host 做 mask / scheduler.step）。
 
-from chameleon.deploy.cosmos3.shapes import POLICY_DROID as _P
+from chameleon.deploy.cosmos3.shapes import POLICY_DROID as _P, dit_trt_dynamic_shapes
 
-_num_noisy_vision = (_P.latent_t - 1) * _P.patch_h * _P.patch_w  # policy: latent frame 0 clean
-_num_noisy_action = _P.chunk_size  # policy: all action tokens noisy
-
-_shapes = {
-    "vision_tokens": (1, _P.latent_channels, _P.latent_t, _P.latent_h, _P.latent_w),
-    "vision_timesteps": (_num_noisy_vision,),
-    "action_tokens": (_P.chunk_size, _P.action_dim),
-    "action_timesteps": (_num_noisy_action,),
-}
+_shapes = dit_trt_dynamic_shapes(_P)
 
 build_cfg = {
     "precision": "bf16",

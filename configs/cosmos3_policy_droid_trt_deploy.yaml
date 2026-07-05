@@ -25,7 +25,7 @@ model_overrides:
   checkpoint: /root/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
   precision: bfloat16
   mode: action
-  action_dim: 32
+  action_dim: 64  # 模型训练宽度；DROID 输出裁剪到 raw_action_dim=10（见 shapes.POLICY_DROID）
   action_horizon: 16
   enable_safety_checker: false
 

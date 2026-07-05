@@ -24,7 +24,7 @@ model_overrides:
   model_id: nvidia/Cosmos3-Nano
   precision: bfloat16
   mode: action
-  action_dim: 32
+  action_dim: 64  # 模型训练宽度；输出裁剪到 raw_action_dim=10
   action_horizon: 16
   trt_profile: nano_action
   enable_safety_checker: false

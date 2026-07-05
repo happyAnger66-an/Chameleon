@@ -92,7 +92,11 @@ def build_policy_pack(
     cfg = pipe.transformer.config
 
     # Reconcile documented profile defaults against the real checkpoint config.
-    latent_channels = int(getattr(pipe.vae.config, "z_dim", profile.latent_channels))
+    latent_channels = int(
+        getattr(cfg, "latent_channel", None)
+        or getattr(pipe.vae.config, "z_dim", None)
+        or profile.latent_channels
+    )
     scale_t = int(getattr(pipe.vae.config, "scale_factor_temporal", profile.scale_factor_temporal))
     scale_s = int(getattr(pipe.vae.config, "scale_factor_spatial", profile.scale_factor_spatial))
     if (latent_channels, scale_t, scale_s) != (

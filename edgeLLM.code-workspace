@@ -53,6 +53,9 @@
 		},
 		{
 			"path": "../FlashRT"
+		},
+		{
+			"path": "../Model-Optimizer"
 		}
 	],
 	"settings": {}

@@ -101,6 +101,7 @@ def build_cosmos3_stage_engine(
     build_cfg_path: str | Path | None = None,
     use_cudagraph: bool | None = None,
 ) -> str:
+    from chameleon.deploy.cosmos3.shapes import validate_build_cfg_matches_onnx
     from chameleon.deploy.trt_build import build_engine, validate_precision_matches_onnx
 
     paths = paths or resolve_cosmos3_paths(task)
@@ -119,6 +120,7 @@ def build_cosmos3_stage_engine(
     cudagraph = task.deploy.use_cudagraph if use_cudagraph is None else use_cudagraph
     precision = build_cfg.get("precision", "bf16")
     validate_precision_matches_onnx(str(onnx_path), precision)
+    validate_build_cfg_matches_onnx(str(onnx_path), build_cfg, stage=stage)
 
     logger.info(
         "Building cosmos3 TRT engine stage=%s onnx=%s engine=%s build_cfg=%s",

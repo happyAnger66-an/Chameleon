@@ -12,7 +12,12 @@ import pytest
 
 from chameleon.config.schema import TaskConfig
 from chameleon.deploy.build_cfg import load_build_cfg
-from chameleon.deploy.cosmos3.shapes import NANO_ACTION, POLICY_DROID, get_profile
+from chameleon.deploy.cosmos3.shapes import (
+    NANO_ACTION,
+    POLICY_DROID,
+    dit_trt_dynamic_shapes,
+    get_profile,
+)
 from chameleon.workflows.runner import WorkflowRunner
 
 
@@ -33,11 +38,16 @@ def _diffusers_cosmos3_available() -> bool:
 class TestCosmos3TrtProfiles:
     def test_profile_derived_shapes(self) -> None:
         p = POLICY_DROID
+        assert p.latent_channels == 48
+        assert p.action_dim == 64
         assert p.latent_t == (p.num_frames - 1) // p.scale_factor_temporal + 1
         assert p.latent_h == p.canvas_h // p.scale_factor_spatial
         assert p.latent_w == p.canvas_w // p.scale_factor_spatial
         assert p.num_vision_tokens == p.latent_t * p.patch_h * p.patch_w
         assert p.sequence_length == p.text_prefix_len + p.num_vision_tokens + p.chunk_size
+        assert dit_trt_dynamic_shapes(p)["vision_tokens"] == (1, 48, 5, 30, 52)
+        assert dit_trt_dynamic_shapes(p)["action_tokens"] == (16, 64)
+        assert dit_trt_dynamic_shapes(p)["vision_timesteps"] == (1560,)
 
     def test_get_profile(self) -> None:
         assert get_profile("policy_droid") is POLICY_DROID

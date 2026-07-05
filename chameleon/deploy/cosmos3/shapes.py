@@ -47,8 +47,10 @@ class Cosmos3Profile:
     fps: float
     guidance_scale: float
     num_inference_steps: int
-    # transformer / VAE 派生量（默认按 Cosmos3-Nano-Policy；加载后以真实 config 复核）。
-    latent_channels: int  # VAE z_dim（进入 dit 前归一化 latent 的通道）
+    # transformer / VAE 派生量（Cosmos3-Nano 族：latent_channel=48, action_dim=64）。
+    # 加载 pipeline 后 ``build_policy_pack`` 会用 checkpoint config 复核；若与下列值
+    # 不一致会打 warning 并以 checkpoint 为准 export，此时 build_cfg 须同步更新。
+    latent_channels: int  # transformer latent_channel / VAE z_dim（MoT 输入 C）
     latent_patch_size: int  # transformer latent_patch_size（空间 patch 化）
     scale_factor_temporal: int
     scale_factor_spatial: int
@@ -100,11 +102,11 @@ POLICY_DROID = Cosmos3Profile(
     fps=24.0,
     guidance_scale=1.0,
     num_inference_steps=30,
-    latent_channels=16,
+    latent_channels=48,
     latent_patch_size=2,
     scale_factor_temporal=4,
     scale_factor_spatial=16,
-    action_dim=32,
+    action_dim=64,
     raw_action_dim=10,
     text_prefix_len=256,
 )
@@ -124,11 +126,11 @@ NANO_ACTION = Cosmos3Profile(
     fps=24.0,
     guidance_scale=1.0,
     num_inference_steps=35,
-    latent_channels=16,
+    latent_channels=48,
     latent_patch_size=2,
     scale_factor_temporal=4,
     scale_factor_spatial=16,
-    action_dim=32,
+    action_dim=64,
     raw_action_dim=10,
     text_prefix_len=256,
 )
@@ -143,3 +145,51 @@ def get_profile(name: str) -> Cosmos3Profile:
     if name not in _PROFILES:
         raise KeyError(f"Unknown cosmos3 profile {name!r}; expected one of {sorted(_PROFILES)}.")
     return _PROFILES[name]
+
+
+def dit_trt_dynamic_shapes(profile: Cosmos3Profile) -> dict[str, tuple[int, ...]]:
+    """TRT build 用 dit 动态输入 shape（须与 export 的 ONNX 静态维一致）。"""
+    num_noisy_vision = (profile.latent_t - 1) * profile.patch_h * profile.patch_w
+    return {
+        "vision_tokens": (1, profile.latent_channels, profile.latent_t, profile.latent_h, profile.latent_w),
+        "vision_timesteps": (num_noisy_vision,),
+        "action_tokens": (profile.chunk_size, profile.action_dim),
+        "action_timesteps": (profile.chunk_size,),
+    }
+
+
+def infer_onnx_static_input_shapes(onnx_path: str) -> dict[str, tuple[int, ...]]:
+    """读取 ONNX 输入的静态维度（全为常量的轴）。"""
+    import onnx
+
+    model = onnx.load(onnx_path, load_external_data=False)
+    shapes: dict[str, tuple[int, ...]] = {}
+    for inp in model.graph.input:
+        dims = []
+        for d in inp.type.tensor_type.shape.dim:
+            if d.dim_value <= 0:
+                break
+            dims.append(int(d.dim_value))
+        else:
+            shapes[inp.name] = tuple(dims)
+    return shapes
+
+
+def validate_build_cfg_matches_onnx(onnx_path: str, build_cfg: dict, *, stage: str) -> None:
+    """build 前校验 build_cfg profile 与 ONNX 静态输入维一致，避免 TRT kMIN 报错。"""
+    onnx_shapes = infer_onnx_static_input_shapes(onnx_path)
+    expected = build_cfg.get("opt_shapes") or build_cfg.get("min_shapes") or {}
+    mismatches: list[str] = []
+    for name, shape in expected.items():
+        if name not in onnx_shapes:
+            continue
+        exp = tuple(int(x) for x in shape)
+        got = onnx_shapes[name]
+        if exp != got:
+            mismatches.append(f"{name}: build_cfg={exp} onnx={got}")
+    if mismatches:
+        raise ValueError(
+            f"cosmos3 stage {stage!r} build_cfg shapes do not match exported ONNX {onnx_path}: "
+            + "; ".join(mismatches)
+            + ". Re-export with the correct profile or update build_cfg / shapes.py."
+        )
