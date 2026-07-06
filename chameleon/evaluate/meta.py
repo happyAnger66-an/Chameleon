@@ -7,6 +7,20 @@ from typing import Any
 from chameleon.config.schema import TaskConfig
 from chameleon.evaluate.trt_eval_utils import should_attach_tensorrt_meta, tensorrt_meta
 
+_PT_TRT_COMPARE_RUNNERS = frozenset({"pt_trt_compare", "cosmos3_pt_trt_compare"})
+
+
+def is_pt_trt_compare_runner(policy_runner: str | None) -> bool:
+    return (policy_runner or "") in _PT_TRT_COMPARE_RUNNERS
+
+
+def resolve_compare_mode(task: TaskConfig) -> bool:
+    """WebUI 双路对比开关：显式 compare_mode 或 pt_trt_compare 类 runner。"""
+    ev = task.evaluate
+    if bool(ev.compare_mode):
+        return True
+    return is_pt_trt_compare_runner(ev.policy_runner)
+
 
 def build_eval_run_meta(
     task: TaskConfig,
@@ -25,7 +39,7 @@ def build_eval_run_meta(
         "run_id": run_id,
         "repo_id": repo_id,
         "backend": task.evaluate.policy_runner,
-        "compare_mode": bool(task.evaluate.compare_mode),
+        "compare_mode": resolve_compare_mode(task),
         "pred1_name": "PyTorch",
         "pred2_name": "TensorRT",
         "pair_name": "PT−TRT",

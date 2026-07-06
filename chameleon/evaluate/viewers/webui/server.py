@@ -134,7 +134,11 @@ def _encode_step_event(rt: WebUIServerRuntime, event: EvalStepEvent) -> str:
         metrics=dict(event.metrics),
         images=images,
         server_timing=timing,
-        pred_action_trt=list(event.pred_action_trt) if event.pred_action_trt else None,
+        pred_action_trt=(
+            list(event.pred_action_trt)
+            if event.pred_action_trt is not None
+            else None
+        ),
     )
     return step_event_to_json(step)
 
@@ -171,6 +175,8 @@ def _infer_worker(task: TaskConfig, rt: WebUIServerRuntime, result: dict[str, An
             },
         )
         rt.meta_ready["msg"] = json.dumps(meta, ensure_ascii=False, separators=(",", ":"))
+        # 已向 loading 阶段连接的客户端补发正式 meta（避免 compare_mode 未生效、仅显示 gt+PT）。
+        rt.bridge.sync_emit_text(rt.meta_ready["msg"])
 
         sink = build_eval_viewer(
             task,

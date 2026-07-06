@@ -31,6 +31,28 @@ function dualPairUsesTrtMetricKeys() {
 let serverLoadStepList = [];
 /** 本会话是否已收到过 step：用于「清空显示」后恢复横幅为 idle / live */
 let inferHasReceivedStep = false;
+
+const PT_TRT_COMPARE_BACKENDS = new Set(["pt_trt_compare", "cosmos3_pt_trt_compare"]);
+
+/** 从 meta 推断是否启用 PyTorch vs TRT 双路曲线（兼容旧服务端未带 compare_mode 字段）。 */
+function applyCompareFlagsFromMeta(m) {
+  if (!m || m.phase === "loading") {
+    compareMode = false;
+    ptqCompareMode = false;
+    ptqTrtCompareMode = false;
+    ortCompareMode = false;
+    trtOrtCompareMode = false;
+    trtTrtCompareMode = false;
+    return;
+  }
+  compareMode = Boolean(m.compare_mode) || PT_TRT_COMPARE_BACKENDS.has(String(m.backend || ""));
+  ptqCompareMode = Boolean(m.ptq_compare);
+  ptqTrtCompareMode = Boolean(m.ptq_trt_compare);
+  ortCompareMode = Boolean(m.ort_compare);
+  trtOrtCompareMode = Boolean(m.trt_ort_compare);
+  trtTrtCompareMode = Boolean(m.trt_trt_compare);
+}
+
 function dualPredMode() {
   return (
     compareMode ||
@@ -2043,6 +2065,17 @@ function pushPoint(event) {
   const predAction = event.pred_action || [];
   const predTrtAction = event.pred_action_trt || [];
   const predPtqAction = event.pred_action_ptq || [];
+  // 若 meta 未标 compare_mode 但 step 携带 TRT 动作，仍启用双路显示。
+  if (
+    !dualPredMode() &&
+    Array.isArray(event.pred_action_trt) &&
+    event.pred_action_trt.length > 0
+  ) {
+    compareMode = true;
+    setDimTraceToggleUi();
+    setCompareLayoutVisible(true);
+    applyCompareUiLabels();
+  }
   const predSecond = ptqCompareMode ? predPtqAction : predTrtAction;
 
   for (const d of state.dims) {
@@ -2351,12 +2384,7 @@ function connectInternal() {
         inferHasReceivedStep = false;
         el("repoId").textContent = "…";
         el("backend").textContent = "…";
-        compareMode = false;
-        ptqCompareMode = false;
-        ptqTrtCompareMode = false;
-        ortCompareMode = false;
-        trtOrtCompareMode = false;
-        trtTrtCompareMode = false;
+        applyCompareFlagsFromMeta(msg);
         applyCompareUiLabels();
         setCompareLayoutVisible(false);
         const prc = el("ptqLayerReportCard");
@@ -2375,12 +2403,7 @@ function connectInternal() {
         return;
       }
       meta = msg;
-      compareMode = Boolean(meta.compare_mode);
-      ptqCompareMode = Boolean(meta.ptq_compare);
-      ptqTrtCompareMode = Boolean(meta.ptq_trt_compare);
-      ortCompareMode = Boolean(meta.ort_compare);
-      trtOrtCompareMode = Boolean(meta.trt_ort_compare);
-      trtTrtCompareMode = Boolean(meta.trt_trt_compare);
+      applyCompareFlagsFromMeta(meta);
       applyCompareUiLabels();
       setCompareLayoutVisible(dualPredMode());
       syncPtqLayerReportCard();
