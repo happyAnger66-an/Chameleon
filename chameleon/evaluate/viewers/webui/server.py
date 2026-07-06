@@ -42,6 +42,8 @@ def _client_dir() -> Path:
 
 
 def default_client_ws_url(cfg: EvaluateConfig) -> str:
+    if cfg.webui_client_ws_url:
+        return cfg.webui_client_ws_url.strip()
     host = cfg.webui_host.strip()
     if host in ("0.0.0.0", "::", ""):
         host = "127.0.0.1"
@@ -257,12 +259,15 @@ async def _run_server(task: TaskConfig) -> EvalSummary:
     pump_task = asyncio.create_task(rt.bridge.drain(encode_fn), name="webui_pump")
 
     logger.info(
-        "[webui] ws=%s  static=%s  (python -m http.server 8080 -d %s)",
+        "[webui] bind=%s:%s  client_ws=%s  static=%s  (python -m http.server 8080 --bind 0.0.0.0 -d %s)",
+        cfg.webui_host,
+        cfg.webui_port,
         hint_url,
         client_dir,
         client_dir,
     )
-    print(f"[webui] WebSocket: {hint_url}")
+    print(f"[webui] WebSocket listen: {cfg.webui_host}:{cfg.webui_port}{cfg.webui_path}")
+    print(f"[webui] WebSocket (browser): {hint_url}")
     print(f"[webui] 浏览器打开: cd {client_dir} && python -m http.server 8080")
 
     infer_thread.start()

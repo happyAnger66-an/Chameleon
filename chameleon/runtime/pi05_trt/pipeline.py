@@ -8,10 +8,48 @@ from typing import Any
 
 import torch
 
+from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
 from chameleon.models.pi05.attention import make_att_2d_masks
 from chameleon.runtime.base import Engine
 
 logger = logging.getLogger(__name__)
+
+
+def _pad_prefix_to_static_len(
+    prefix_embs: torch.Tensor,
+    prefix_pad_masks: torch.Tensor,
+    prefix_att_masks: torch.Tensor,
+    target_len: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """将 prefix 右侧 pad 到 TRT 静态 engine 的 seq_len（无效位 pad_mask=False）。"""
+    seq_len = int(prefix_embs.shape[1])
+    if seq_len == target_len:
+        return prefix_embs, prefix_pad_masks, prefix_att_masks
+    if seq_len > target_len:
+        raise ValueError(
+            f"prefix length {seq_len} exceeds TRT static target {target_len}; "
+            "rebuild llm/denoise engines with a larger seq_len or shorten prompt/images."
+        )
+    pad_len = target_len - seq_len
+    batch = prefix_embs.shape[0]
+    hidden = prefix_embs.shape[2]
+    device = prefix_embs.device
+    logger.debug(
+        "Padding prefix sequence %d -> %d for static TRT llm/denoise engines.",
+        seq_len,
+        target_len,
+    )
+    prefix_embs = torch.cat(
+        [
+            prefix_embs,
+            torch.zeros(batch, pad_len, hidden, device=device, dtype=prefix_embs.dtype),
+        ],
+        dim=1,
+    )
+    pad_false = torch.zeros(batch, pad_len, device=device, dtype=torch.bool)
+    prefix_pad_masks = torch.cat([prefix_pad_masks, pad_false], dim=1)
+    prefix_att_masks = torch.cat([prefix_att_masks, pad_false], dim=1)
+    return prefix_embs, prefix_pad_masks, prefix_att_masks
 
 
 def _embed_prefix_trt(
@@ -59,9 +97,11 @@ class Pi05TrtPipeline:
         engines: dict[str, Engine],
         *,
         num_steps: int = 10,
+        static_prefix_len: int = PI05_LIBERO_PREFIX_LEN,
     ) -> None:
         self._engines = engines
         self._num_steps = num_steps
+        self._static_prefix_len = int(static_prefix_len)
 
     @property
     def num_steps(self) -> int:
@@ -97,6 +137,12 @@ class Pi05TrtPipeline:
             img_masks,
             lang_tokens,
             lang_masks,
+        )
+        prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
+            prefix_embs,
+            prefix_pad_masks,
+            prefix_att_masks,
+            self._static_prefix_len,
         )
 
         prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)

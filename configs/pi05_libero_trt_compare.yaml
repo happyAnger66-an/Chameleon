@@ -12,8 +12,9 @@
 #       --config configs/pi05_libero_trt_compare.yaml
 #
 # 浏览器（另开终端）：
-#   cd chameleon/evaluate/webui_client && python -m http.server 8080
-#   打开 http://127.0.0.1:8080  （WebSocket 默认 ws://127.0.0.1:8766/ws）
+#   cd chameleon/evaluate/webui_client && python -m http.server 8080 --bind 0.0.0.0
+#   本机：http://127.0.0.1:8080  远程：http://<服务器IP>:8080
+#   WebSocket：ws://<服务器IP>:8766/ws（见 evaluate.webui_client_ws_url）
 
 architecture: pi05
 model: pi05
@@ -70,7 +71,8 @@ evaluate:
   device: cuda
   pytorch_load_device: cpu
   viewer: both
-  webui_host: 127.0.0.1
+  webui_host: 0.0.0.0          # 监听所有网卡，允许远程连 WebSocket
+  # webui_client_ws_url: ws://YOUR_SERVER_IP:8766/ws  # 远程访问时取消注释并改 IP
   webui_port: 8766
   webui_path: /ws
   webui_history_size: 200

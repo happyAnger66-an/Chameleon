@@ -298,7 +298,11 @@ class EvaluateConfig(BaseModel):
     """评测结果展示：``console`` | ``webui`` | ``both``。"""
 
     webui_host: str = "127.0.0.1"
-    """WebUI WebSocket 监听地址。"""
+    """WebUI WebSocket 监听地址；远程访问设为 ``0.0.0.0``。"""
+
+    webui_client_ws_url: str | None = None
+    """浏览器默认 WebSocket 地址（写入 ``webui_client/server_hint.json``）。
+    监听 ``0.0.0.0`` 时建议设为 ``ws://<本机局域网或公网 IP>:{webui_port}{webui_path}``。"""
 
     webui_port: int = 8765
     """WebUI WebSocket 端口。"""
