@@ -50,7 +50,7 @@ data:
   # repo_id 留空时自动从 openpi pi05_libero DataConfig 读取 physical-intelligence/libero
   # （与 model_optimizer lerobot_eval_webui 一致，不在 YAML 里写占位符）。
   # 若数据已下载到本地 HF 缓存，可指定 dataset_root 避免联网：
-  # dataset_root: ~/.cache/huggingface/lerobot/physical-intelligence/libero
+  dataset_root: /root/.cache/huggingface/lerobot/physical-intelligence/libero
   start_index: 0
   num_samples: 20
 
