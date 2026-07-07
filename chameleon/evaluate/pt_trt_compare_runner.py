@@ -142,7 +142,18 @@ class Pi05PtTrtCompareRunner(PolicyRunner, SupportsDualInfer, SupportsFixedNoise
         flow_noise = noise if noise is not None else self.noise_for_sample(sample_index)
         pred_pt = self._pt.infer(observation, noise=flow_noise)
         out_trt = self._policy_trt.infer(dict(observation), noise=flow_noise)
-        pred_trt = np.asarray(out_trt["actions"])
+        pred_trt = np.asarray(out_trt["actions"], dtype=np.float32)
+        if pred_trt.ndim == 3 and pred_trt.shape[0] == 1:
+            pred_trt = pred_trt[0]
+        if not np.isfinite(pred_trt).all():
+            n_bad = int(np.size(pred_trt) - np.isfinite(pred_trt).sum())
+            logger.warning(
+                "Pi05PtTrtCompareRunner: TRT actions contain %d non-finite values "
+                "(sample_index=%d shape=%s)",
+                n_bad,
+                sample_index,
+                pred_trt.shape,
+            )
         return pred_pt, pred_trt
 
     @property

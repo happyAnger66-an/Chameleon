@@ -940,6 +940,52 @@ function relayoutAutorange(gd) {
   }
 }
 
+/** Plotly.react 在 trace 条数变化时不会追加第 3 条曲线，需 newPlot。 */
+function redrawDimChart(d, gd) {
+  const traces = buildTracesForDim(d);
+  const layout = chartLayouts.get(d) || buildPlotlyLayout();
+  chartLayouts.set(d, layout);
+  if (!gd) return;
+  const needNewPlot = !gd.data || gd.data.length !== traces.length;
+  try {
+    if (needNewPlot) {
+      Plotly.purge(gd);
+      Plotly.newPlot(gd, traces, layout, { displayModeBar: false, responsive: true });
+      return;
+    }
+    Plotly.react(gd, traces, layout, { displayModeBar: false, responsive: true });
+    relayoutAutorange(gd);
+  } catch (e) {
+    try {
+      Plotly.purge(gd);
+    } catch (e2) {
+      /* ignore */
+    }
+    Plotly.newPlot(gd, traces, layout, { displayModeBar: false, responsive: true });
+  }
+}
+
+function refreshAllDimChartsFromState() {
+  if (isDimChartsFoldCollapsed() || !isPlotlyLoaded()) return;
+  for (const d of state.dims) {
+    redrawDimChart(d, document.getElementById(chartDivId(d)));
+  }
+}
+
+function summarizePredTrtField(action) {
+  if (action === undefined) return "字段缺失";
+  if (action === null) return "null";
+  if (!Array.isArray(action)) return "非数组";
+  if (action.length === 0) return "空数组";
+  let finite = 0;
+  let nullish = 0;
+  for (const v of action) {
+    if (v === null || v === undefined) nullish += 1;
+    else if (typeof v === "number" && Number.isFinite(v)) finite += 1;
+  }
+  return `len=${action.length} finite=${finite} null=${nullish}`;
+}
+
 function refreshDimChartsTheme() {
   if (isDimChartsFoldCollapsed()) {
     return;
@@ -1228,9 +1274,13 @@ function updateProgressFromStep(msg) {
   const H = meta && typeof meta.action_horizon === "number" ? meta.action_horizon : "?";
   stepReceiveCount += 1;
   const chunkMark = msg.is_chunk_start ? " [chunk 起点]" : "";
+  let trtHint = "";
+  if (dualPredMode() || msg.pred_action_trt != null) {
+    trtHint = ` · pred_action_trt: ${summarizePredTrtField(msg.pred_action_trt)}`;
+  }
   setProgress(
     `推送中${chunkMark} · 累计 step 消息 ${stepReceiveCount} · global_index=${msg.global_index} · ` +
-      `k_in_chunk=${msg.k_in_chunk}/${H} · episode_id=${msg.episode_id}`
+      `k_in_chunk=${msg.k_in_chunk}/${H} · episode_id=${msg.episode_id}${trtHint}`
   );
 }
 
@@ -2075,6 +2125,7 @@ function pushPoint(event) {
     setDimTraceToggleUi();
     setCompareLayoutVisible(true);
     applyCompareUiLabels();
+    refreshAllDimChartsFromState();
   }
   const predSecond = ptqCompareMode ? predPtqAction : predTrtAction;
 
@@ -2175,19 +2226,7 @@ function pushPoint(event) {
 
   if (!isDimChartsFoldCollapsed() && isPlotlyLoaded()) {
     for (const d of state.dims) {
-      const id = chartDivId(d);
-      const gd = document.getElementById(id);
-      if (!gd) continue;
-      try {
-        const layout = chartLayouts.get(d) || buildPlotlyLayout();
-        chartLayouts.set(d, layout);
-        Plotly.react(gd, buildTracesForDim(d), layout, { displayModeBar: false, responsive: true });
-        relayoutAutorange(gd);
-      } catch (e) {
-        const layout = chartLayouts.get(d) || buildPlotlyLayout();
-        chartLayouts.set(d, layout);
-        Plotly.newPlot(gd, buildTracesForDim(d), layout, { displayModeBar: false, responsive: true });
-      }
+      redrawDimChart(d, document.getElementById(chartDivId(d)));
     }
   }
 
@@ -2439,17 +2478,15 @@ function connectInternal() {
       setInferLoadingSub("模型与数据已就绪，等待首次推理结果（step）推送…");
       setServerProgressRunVisible(false);
       setInferLoadingBanner(true);
-      queueMicrotask(() => {
-        purgeAndNewPlotAllChartsSync();
-        for (const d of state.dims) {
-          const t = document.getElementById(`dimTitle-${d}`);
-          if (t) t.textContent = dimChartTitlePlaceholder(d);
-        }
-        updateMetricChartWrapTitles();
-        setDimTraceToggleUi();
-        renderMetricDimToggles();
-        refreshCompareDimTable();
-      });
+      purgeAndNewPlotAllChartsSync();
+      setDimTraceToggleUi();
+      renderMetricDimToggles();
+      refreshCompareDimTable();
+      for (const d of state.dims) {
+        const t = document.getElementById(`dimTitle-${d}`);
+        if (t) t.textContent = dimChartTitlePlaceholder(d);
+      }
+      updateMetricChartWrapTitles();
       return;
     }
 

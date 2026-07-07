@@ -72,6 +72,10 @@ def _align_horizon(
     """裁剪到共同的 [horizon, action_dim]，使 pred 与 gt 形状一致。"""
     pred = np.asarray(pred, dtype=np.float32)
     gt = np.asarray(gt, dtype=np.float32)
+    if pred.ndim == 3 and pred.shape[0] == 1:
+        pred = pred[0]
+    if gt.ndim == 3 and gt.shape[0] == 1:
+        gt = gt[0]
     if pred.ndim == 1:
         pred = pred[None, :]
     if gt.ndim == 1:
@@ -143,11 +147,15 @@ def _emit_step_events(
         if running is not None:
             running.update(gt_row, pred_row)
             metrics = {**metrics, **running.metrics_payload()}
-        pred_trt_list = (
-            [float(x) for x in pred_trt_row.astype(np.float64).tolist()]
-            if pred_trt_row is not None
-            else None
-        )
+        pred_trt_list = None
+        if pred_trt_row is not None:
+            row = pred_trt_row.astype(np.float64)
+            pred_trt_list = [float(x) for x in row.tolist()]
+            if k == 0 and sample_index == 0 and not np.isfinite(row).all():
+                logger.warning(
+                    "[eval] pred_action_trt has non-finite values at sample_index=0 "
+                    "(WebUI 会将 NaN/Inf 序列化为 null，曲线可能不可见)"
+                )
         sink.on_step(
             EvalStepEvent(
                 run_id=run_id,
@@ -229,7 +237,11 @@ def evaluate_lerobot(
         noise_fn = policy_runner.noise_for_sample if isinstance(policy_runner, SupportsFixedNoise) else None
         flow_noise = noise_fn(sample.index) if noise_fn is not None else None
         if infer_dual is not None:
-            pred, pred_trt = infer_dual(sample.observation, sample_index=sample.index)
+            pred, pred_trt = infer_dual(
+                sample.observation,
+                sample_index=sample.index,
+                noise=flow_noise,
+            )
         else:
             pred = policy_runner.infer(sample.observation, noise=flow_noise)
         infer_ms = (time.perf_counter() - t0) * 1000.0

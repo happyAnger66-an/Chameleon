@@ -16,7 +16,7 @@ from chameleon.deploy.pi05.shapes import PI05_LIBERO_PREFIX_LEN
 
 logger = logging.getLogger(__name__)
 
-_ATTN_MASK_FILL_VALUE = -2.3819763e38
+_ATTN_MASK_FILL_VALUE = -1e4
 
 
 def create_sinusoidal_pos_embedding(

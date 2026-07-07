@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import math
+from unittest.mock import MagicMock
+
 import pytest
 import torch
 
-from chameleon.runtime.pi05_trt.pipeline import _pad_prefix_to_static_len
+from chameleon.runtime.pi05_trt.pipeline import (
+    _pad_prefix_to_static_len,
+    _restore_vit_scale_for_openpi,
+    _sanitize_attention_mask_for_trt,
+)
 
 
 def test_pad_prefix_noop_when_lengths_match() -> None:
@@ -35,3 +42,20 @@ def test_pad_prefix_raises_when_too_long() -> None:
     att = torch.zeros(1, 6, dtype=torch.bool)
     with pytest.raises(ValueError, match="exceeds TRT static target"):
         _pad_prefix_to_static_len(embs, pad, att, 5)
+
+
+def test_sanitize_attention_mask_for_trt() -> None:
+    mask = torch.tensor([0.0, -2.3819763e38], dtype=torch.float32)
+    out = _sanitize_attention_mask_for_trt(mask)
+    assert out[0].item() == 0.0
+    assert out[1].item() == -1e4
+
+
+def test_restore_vit_scale_for_openpi() -> None:
+    model = MagicMock()
+    model.paligemma_with_expert.paligemma.config.text_config.hidden_size = 2048
+    emb = torch.ones(1, 2, 2048, dtype=torch.bfloat16)
+    out = _restore_vit_scale_for_openpi(emb, model)
+    expected = math.sqrt(2048)
+    assert out.shape == emb.shape
+    assert abs(float(out[0, 0, 0].float()) - expected) < 0.01
