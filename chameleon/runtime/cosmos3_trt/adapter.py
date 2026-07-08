@@ -64,8 +64,11 @@ def _offload_replaced_modules_to_cpu(pipe: Any) -> None:
     dtype / attribute reads still work on meta modules; only a forward would fail
     (which this path never does). Falls back to CPU if meta is unsupported.
     """
+    import gc
+
     from chameleon.runtime.tensorrt.backend import memory_report
 
+    freed = False
     for attr in ("transformer", "vae"):
         mod = getattr(pipe, attr, None)
         to_fn = getattr(mod, "to", None)
@@ -73,11 +76,8 @@ def _offload_replaced_modules_to_cpu(pipe: Any) -> None:
             continue
         try:
             to_fn("meta")
-            logger.warning(
-                "cosmos3 TRT: freed host pipeline.%s to meta (TRT engine replaces it) [%s]",
-                attr,
-                memory_report(),
-            )
+            freed = True
+            logger.warning("cosmos3 TRT: freed host pipeline.%s to meta (TRT engine replaces it).", attr)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "cosmos3 TRT: could not free pipeline.%s to meta (%s); trying cpu.", attr, exc
@@ -86,6 +86,20 @@ def _offload_replaced_modules_to_cpu(pipe: Any) -> None:
                 to_fn("cpu")
             except Exception as exc2:  # noqa: BLE001
                 logger.warning("cosmos3 TRT: offload pipeline.%s failed: %s", attr, exc2)
+
+    # ``.to("meta")`` drops the module storage, but torch's CUDA caching allocator
+    # holds the freed blocks (reserved, not returned to the OS) until we release
+    # the cache — otherwise the memory is unavailable to the TRT engines.
+    if freed:
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:  # noqa: BLE001
+            pass
+    logger.warning("cosmos3 TRT: host weights offloaded [%s]", memory_report())
 
 
 def _normalize_pixels(t: torch.Tensor, *, was_int: bool) -> torch.Tensor:

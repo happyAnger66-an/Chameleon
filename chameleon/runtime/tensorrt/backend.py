@@ -125,10 +125,13 @@ class TensorRTEngine(Engine):
                 else ""
             )
             raise RuntimeError(
-                f"TRT stage {stage!r}: create_execution_context() returned None — TensorRT "
-                "could not allocate the context's device/activation memory (typically GPU OOM)."
-                f"{mem} Free up memory (e.g. keep large host PyTorch weights off-GPU, load fewer "
-                "engines concurrently, or lower the build workspace/profile)."
+                f"TRT stage {stage!r}: create_execution_context() returned None."
+                f"{mem} Common causes: (1) a missing plugin — see any preceding "
+                "'Cannot find plugin: ... IPluginCreator not found' log; ensure "
+                "trt.init_libnvinfer_plugins() ran and the same plugin libs used at build "
+                "time are loaded at runtime; (2) GPU OOM allocating the context's "
+                "activation/device memory — free memory (keep host PyTorch weights off-GPU, "
+                "load fewer engines, or lower the build workspace/profile)."
             )
         # Select an optimization profile (e.g. context/prefill vs generation/decode)
         # when the engine was built with more than the implicit profile.
@@ -267,6 +270,15 @@ class TensorRTRuntime(RuntimeBackend):
         import tensorrt as trt  # type: ignore
 
         trt_logger = trt.Logger(trt.Logger.WARNING)
+        # Register TensorRT's built-in plugins (ScatterElements, etc.). Unlike the
+        # build path (trtexec/builder auto-registers), a bare runtime deserialize
+        # does NOT — without this, engines that used plugins fail at
+        # createExecutionContext with "Cannot find plugin: ... IPluginCreator
+        # not found in Plugin Registry" (context comes back None).
+        try:
+            trt.init_libnvinfer_plugins(trt_logger, "")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("trt.init_libnvinfer_plugins failed (%s); plugin engines may fail.", exc)
         runtime = trt.Runtime(trt_logger)
         # mmap the plan instead of ``f.read()`` so we don't hold a full extra copy
         # of the engine bytes in RAM (dit ~28GB). Critical on unified-memory
