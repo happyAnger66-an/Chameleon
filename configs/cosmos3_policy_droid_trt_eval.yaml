@@ -40,7 +40,7 @@ deploy:
 # 需要 tensorflow + tensorflow_datasets（见 dataloader/cosmos3_droid.py）。
 data:
   dataset: cosmos3_droid
-  dataset_root: ~/robot/datasets
+  dataset_root: /root/.cache/droid_100/
   start_index: 0
   num_samples: 32
 
