@@ -15,7 +15,8 @@ actions:
 
 model_overrides:
   use_reference: false
-  model_id: nvidia/Cosmos3-Nano-Policy-DROID
+#  model_id: nvidia/Cosmos3-Nano-Policy-DROID
+  checkpoint: /root/.cache/modelscope/models/nv-community--Cosmos3-Nano/snapshots/master
   precision: bfloat16
   mode: action
   trt_profile: policy_droid

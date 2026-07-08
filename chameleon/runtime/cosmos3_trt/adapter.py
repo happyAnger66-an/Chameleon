@@ -29,11 +29,41 @@ def load_cosmos3_host_pipeline(task: TaskConfig, device: str) -> Any:
     config.use_reference = False
     adapter = Cosmos3Adapter(config).build(device)
     if not getattr(adapter, "_is_real_diffusers", False) or adapter.pipeline is None:
+        cause = getattr(adapter, "_diffusers_error", None)
+        hint = (
+            f" 底层加载失败原因: {cause}." if cause else ""
+        )
         raise RuntimeError(
             "cosmos3 TRT runtime requires a real Cosmos3OmniPipeline "
-            "(use_reference=false + valid model_id/checkpoint)."
+            "(use_reference=false + valid model_id/checkpoint)。"
+            f"{hint} 若为 'cannot import name cached_download from huggingface_hub'，"
+            "多为 diffusers 与 huggingface_hub 版本不兼容（本仓库已内置兼容 shim；"
+            "如仍失败请对齐 diffusers/huggingface_hub 版本）。"
         )
+    _offload_replaced_modules_to_cpu(adapter.pipeline)
     return adapter.pipeline
+
+
+def _offload_replaced_modules_to_cpu(pipe: Any) -> None:
+    """Move the host pipeline's heavy ``transformer`` / ``vae`` weights to CPU.
+
+    In the TRT-only policy path the ~16B MoT transformer and the Wan VAE are fully
+    replaced by the ``dit`` / ``vae_encode`` / ``vae_decode`` engines; the host
+    pipeline is only used for tokenize / mRoPE packing / scheduler / velocity
+    masking (all light, config- and shape-level). Keeping their bf16 weights on
+    the GPU (~28–30GB) can starve the large TRT execution contexts and make
+    ``create_execution_context()`` return None (OOM). Offload them so the GPU is
+    reserved for the engines.
+    """
+    for attr in ("transformer", "vae"):
+        mod = getattr(pipe, attr, None)
+        to_fn = getattr(mod, "to", None)
+        if mod is not None and callable(to_fn):
+            try:
+                to_fn("cpu")
+                logger.info("cosmos3 TRT: offloaded host pipeline.%s to CPU (TRT engine replaces it).", attr)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("cosmos3 TRT: could not offload pipeline.%s to CPU: %s", attr, exc)
 
 
 def _normalize_pixels(t: torch.Tensor, *, was_int: bool) -> torch.Tensor:

@@ -53,6 +53,24 @@ def _resolve_attr_path(root, path: tuple[str, ...]):
     return obj
 
 
+def _ensure_huggingface_hub_compat() -> None:
+    """Shim removed ``huggingface_hub.cached_download`` so older diffusers imports.
+
+    Newer ``huggingface_hub`` (>=0.26) dropped ``cached_download`` which some
+    diffusers builds still import at module load time (``cannot import name
+    'cached_download' from 'huggingface_hub'``). Alias it to ``hf_hub_download``
+    so ``import diffusers`` succeeds. Only patches the name when it is missing.
+    """
+    try:
+        import huggingface_hub as hf
+    except Exception:  # noqa: BLE001 - hf_hub always present in inference env
+        return
+    if not hasattr(hf, "cached_download"):
+        fallback = getattr(hf, "hf_hub_download", None)
+        if fallback is not None:
+            hf.cached_download = fallback  # type: ignore[attr-defined]
+
+
 class Cosmos3Adapter(ModelAdapter):
     architecture = ARCHITECTURE_NAME
 
@@ -62,6 +80,7 @@ class Cosmos3Adapter(ModelAdapter):
         self.pipeline: Any | None = None
         self._device = "cpu"
         self._is_real_diffusers = False
+        self._diffusers_error: str | None = None
 
     @classmethod
     def make_config(cls, overrides: dict[str, Any] | None = None) -> Cosmos3Config:
@@ -83,6 +102,7 @@ class Cosmos3Adapter(ModelAdapter):
         失败时回退到参考模型并告警，保证流水线不硬失败（对照 pi05 adapter）。
         """
         try:
+            _ensure_huggingface_hub_compat()
             from diffusers import Cosmos3OmniPipeline
 
             dtype = torch.bfloat16 if self.config.precision == "bfloat16" else torch.float32
@@ -104,6 +124,7 @@ class Cosmos3Adapter(ModelAdapter):
             self.config.use_reference = True
             self._is_real_diffusers = False
             self.pipeline = None
+            self._diffusers_error = f"{type(exc).__name__}: {exc}"
             return Cosmos3ReferenceModel(self.config).to(device).eval()
 
     def stage_module(self, stage: str):

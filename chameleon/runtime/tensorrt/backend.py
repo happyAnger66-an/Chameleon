@@ -89,6 +89,24 @@ class TensorRTEngine(Engine):
         self.stage = stage
         self.device = device
         self._context = engine.create_execution_context()
+        if self._context is None:
+            free_gb = total_gb = None
+            try:
+                free_b, total_b = torch.cuda.mem_get_info()
+                free_gb, total_gb = free_b / 1e9, total_b / 1e9
+            except Exception:  # noqa: BLE001
+                pass
+            mem = (
+                f" GPU mem: free={free_gb:.1f}GB / total={total_gb:.1f}GB."
+                if free_gb is not None
+                else ""
+            )
+            raise RuntimeError(
+                f"TRT stage {stage!r}: create_execution_context() returned None — TensorRT "
+                "could not allocate the context's device/activation memory (typically GPU OOM)."
+                f"{mem} Free up memory (e.g. keep large host PyTorch weights off-GPU, load fewer "
+                "engines concurrently, or lower the build workspace/profile)."
+            )
         # Select an optimization profile (e.g. context/prefill vs generation/decode)
         # when the engine was built with more than the implicit profile.
         if getattr(engine, "num_optimization_profiles", 1) > 1:
