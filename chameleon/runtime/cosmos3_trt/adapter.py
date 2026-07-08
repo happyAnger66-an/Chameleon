@@ -24,10 +24,13 @@ logger = logging.getLogger(__name__)
 def load_cosmos3_host_pipeline(task: TaskConfig, device: str) -> Any:
     """Load the real diffusers ``Cosmos3OmniPipeline`` for host-side preprocessing."""
     from chameleon.models.cosmos3.adapter import Cosmos3Adapter
+    from chameleon.runtime.tensorrt.backend import memory_report
 
     config = Cosmos3Adapter.make_config(task.model_overrides)
     config.use_reference = False
+    logger.warning("cosmos3 TRT: loading host diffusers pipeline [%s]", memory_report())
     adapter = Cosmos3Adapter(config).build(device)
+    logger.warning("cosmos3 TRT: host pipeline loaded [%s]", memory_report())
     if not getattr(adapter, "_is_real_diffusers", False) or adapter.pipeline is None:
         cause = getattr(adapter, "_diffusers_error", None)
         hint = (
@@ -45,25 +48,44 @@ def load_cosmos3_host_pipeline(task: TaskConfig, device: str) -> Any:
 
 
 def _offload_replaced_modules_to_cpu(pipe: Any) -> None:
-    """Move the host pipeline's heavy ``transformer`` / ``vae`` weights to CPU.
+    """Free the host pipeline's heavy ``transformer`` / ``vae`` weights.
 
     In the TRT-only policy path the ~16B MoT transformer and the Wan VAE are fully
     replaced by the ``dit`` / ``vae_encode`` / ``vae_decode`` engines; the host
     pipeline is only used for tokenize / mRoPE packing / scheduler / velocity
-    masking (all light, config- and shape-level). Keeping their bf16 weights on
-    the GPU (~28–30GB) can starve the large TRT execution contexts and make
-    ``create_execution_context()`` return None (OOM). Offload them so the GPU is
-    reserved for the engines.
+    masking (all config- and shape-level — never a transformer/VAE forward). Their
+    bf16 weights (~28–32GB) otherwise sit resident and, together with the large
+    TRT engines being deserialized next, overrun memory (GPU OOM → context=None,
+    or host OOM → ``Killed``).
+
+    We move them to the ``meta`` device, which **drops the tensor storage** and
+    truly frees memory. On unified-memory devices (Jetson) ``.to("cpu")`` would
+    NOT free anything (CPU/GPU share one pool), so ``meta`` is required. Config /
+    dtype / attribute reads still work on meta modules; only a forward would fail
+    (which this path never does). Falls back to CPU if meta is unsupported.
     """
+    from chameleon.runtime.tensorrt.backend import memory_report
+
     for attr in ("transformer", "vae"):
         mod = getattr(pipe, attr, None)
         to_fn = getattr(mod, "to", None)
-        if mod is not None and callable(to_fn):
+        if mod is None or not callable(to_fn):
+            continue
+        try:
+            to_fn("meta")
+            logger.warning(
+                "cosmos3 TRT: freed host pipeline.%s to meta (TRT engine replaces it) [%s]",
+                attr,
+                memory_report(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "cosmos3 TRT: could not free pipeline.%s to meta (%s); trying cpu.", attr, exc
+            )
             try:
                 to_fn("cpu")
-                logger.info("cosmos3 TRT: offloaded host pipeline.%s to CPU (TRT engine replaces it).", attr)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("cosmos3 TRT: could not offload pipeline.%s to CPU: %s", attr, exc)
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("cosmos3 TRT: offload pipeline.%s failed: %s", attr, exc2)
 
 
 def _normalize_pixels(t: torch.Tensor, *, was_int: bool) -> torch.Tensor:

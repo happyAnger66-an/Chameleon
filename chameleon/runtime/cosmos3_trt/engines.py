@@ -15,7 +15,7 @@ from chameleon.core.context import RunContext
 from chameleon.core.platform import get_platform
 from chameleon.deploy.cosmos3.paths import COSMOS3_ENGINE_FILES
 from chameleon.runtime.base import Engine
-from chameleon.runtime.tensorrt.backend import TensorRTRuntime
+from chameleon.runtime.tensorrt.backend import TensorRTRuntime, memory_report
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,13 @@ def load_trt_stage_engines(
         if fname is None:
             raise KeyError(f"Unknown cosmos3 stage {stage!r}; expected one of {sorted(COSMOS3_ENGINE_FILES)}.")
         path = engine_dir / fname
+        size_gb = path.stat().st_size / 1e9 if path.is_file() else 0.0
+        logger.warning(
+            "Loading cosmos3 TRT engine stage=%s (%.1fGB plan) [%s]", stage, size_gb, memory_report()
+        )
         artifact = Artifact(kind="engine", stage=stage, platform=platform.name, path=str(path))
         loaded[stage] = runtime.load(artifact, ctx)
-        logger.info("Loaded cosmos3 TRT engine stage=%s path=%s", stage, path)
+        logger.warning("Loaded cosmos3 TRT engine stage=%s [%s]", stage, memory_report())
     return loaded
 
 

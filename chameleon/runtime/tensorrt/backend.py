@@ -25,6 +25,29 @@ from chameleon.runtime.base import Engine, RuntimeBackend, register_runtime
 logger = logging.getLogger(__name__)
 
 
+def memory_report() -> str:
+    """Compact GPU + host-RSS memory string for load-time diagnostics.
+
+    On unified-memory devices (e.g. Jetson) GPU and host share one physical
+    pool, so both numbers matter when diagnosing OOM / ``Killed``.
+    """
+    parts: list[str] = []
+    try:
+        free_b, total_b = torch.cuda.mem_get_info()
+        parts.append(f"gpu_free={free_b / 1e9:.1f}/{total_b / 1e9:.1f}GB")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    parts.append(f"host_rss={int(line.split()[1]) / 1e6:.1f}GB")
+                    break
+    except Exception:  # noqa: BLE001
+        pass
+    return " ".join(parts) or "n/a"
+
+
 def _trt_to_torch_dtype(trt_dtype) -> torch.dtype:
     import tensorrt as trt  # type: ignore
 
@@ -239,14 +262,22 @@ class TensorRTRuntime(RuntimeBackend):
         if artifact.kind != "engine" or not artifact.path:
             raise ValueError("TensorRTRuntime expects an engine artifact with a path.")
 
+        import mmap
+
         import tensorrt as trt  # type: ignore
 
         trt_logger = trt.Logger(trt.Logger.WARNING)
         runtime = trt.Runtime(trt_logger)
+        # mmap the plan instead of ``f.read()`` so we don't hold a full extra copy
+        # of the engine bytes in RAM (dit ~28GB). Critical on unified-memory
+        # devices where the transient copy can trigger the host OOM killer.
         with open(artifact.path, "rb") as f:
-            engine = runtime.deserialize_cuda_engine(f.read())
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                engine = runtime.deserialize_cuda_engine(mm)
         if engine is None:
-            raise RuntimeError(f"Failed to deserialize TRT engine at {artifact.path}.")
+            raise RuntimeError(
+                f"Failed to deserialize TRT engine at {artifact.path} ({memory_report()})."
+            )
         device = ctx.torch_device if ctx.torch_device.startswith("cuda") else "cuda"
         enable_graph = bool(ctx.options.get("enable_cuda_graph", False))
         profile_index = int(ctx.options.get("profile_index", 0))
