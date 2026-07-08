@@ -217,6 +217,8 @@ def evaluate_lerobot(
     indices = list(range(0, total, max(1, int(stride))))[:num_samples]
     if not indices:
         raise ValueError("数据集为空或 num_samples/stride 配置导致无可评测帧。")
+    # 有界心跳：无论样本数多少，最多 ~10 条进度（在 WebUI 模式 log_every=0 时也可见）。
+    progress_stride = max(1, len(indices) // 10)
 
     sum_max_abs = 0.0
     sum_mean_abs = 0.0
@@ -294,6 +296,16 @@ def evaluate_lerobot(
                 diff.mean_abs,
                 diff.cosine,
                 infer_ms,
+            )
+        if n_done == 1 or n_done == len(indices) or n_done % progress_stride == 0:
+            logger.warning(
+                "[eval] sample %d/%d idx=%d infer_ms=%.0f max_abs=%.4f cosine=%.3f",
+                n_done,
+                len(indices),
+                sample.index,
+                infer_ms,
+                diff.max_abs,
+                diff.cosine,
             )
 
     summary = EvalSummary(

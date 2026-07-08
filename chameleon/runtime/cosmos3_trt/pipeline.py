@@ -9,6 +9,7 @@ dict），因此可用 PyTorch / TensorRT 任一后端的 Engine 驱动。
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import torch
@@ -209,7 +210,11 @@ class Cosmos3PolicyTrtPipeline:
         action_scheduler = copy.deepcopy(pipe.scheduler)
 
         dit = self._engines["dit"]
-        for t in timesteps:
+        n_steps = len(timesteps)
+        log_stride = max(1, n_steps // 5)
+        t_start = time.perf_counter()
+        logger.warning("cosmos3 policy denoise: running %d dit steps...", n_steps)
+        for step_i, t in enumerate(timesteps):
             ts = float(t.item())
             out = dit.run(
                 {
@@ -237,6 +242,17 @@ class Cosmos3PolicyTrtPipeline:
                     cond_v_action.unsqueeze(0), t, action_latents.unsqueeze(0), return_dict=False
                 )[0].squeeze(0)
                 action_latents[:, raw_dim:] = 0
+
+            done = step_i + 1
+            if done == n_steps or done % log_stride == 0:
+                elapsed = time.perf_counter() - t_start
+                logger.warning(
+                    "cosmos3 policy denoise: step %d/%d (%.1fs, %.0f ms/step)",
+                    done,
+                    n_steps,
+                    elapsed,
+                    1000.0 * elapsed / done,
+                )
 
         action_out = action_latents[:, :raw_dim]
         if not return_video:
