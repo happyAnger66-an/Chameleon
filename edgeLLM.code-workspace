@@ -56,6 +56,18 @@
 		},
 		{
 			"path": "../Model-Optimizer"
+		},
+		{
+			"path": "../../lerobot"
+		},
+		{
+			"path": "../../../wj/pnc/anyverse"
+		},
+		{
+			"path": "../../../robot/model/spirit-v1.5"
+		},
+		{
+			"path": "../unifolm-world-model-action"
 		}
 	],
 	"settings": {}
