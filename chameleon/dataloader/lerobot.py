@@ -29,6 +29,8 @@ from chameleon.dataloader.base import (
     ChameleonSample,
     DatasetSpec,
     get_dataset_spec,
+    get_loader,
+    register_loader,
 )
 
 logger = logging.getLogger(__name__)
@@ -298,12 +300,10 @@ class LeRobotDataSource:
         return self._episode_ids
 
 
-_LOADERS: dict[str, type[LeRobotDataSource]] = {
-    "lerobot": LeRobotDataSource,
-}
+register_loader("lerobot", LeRobotDataSource, override=True)
 
 
-def build_dataset(name: str, *, overrides: dict[str, Any] | None = None) -> LeRobotDataSource:
+def build_dataset(name: str, *, overrides: dict[str, Any] | None = None) -> Any:
     """按注册名构建数据源（应用可选 overrides），不立即打开数据集。
 
     Args:
@@ -313,18 +313,16 @@ def build_dataset(name: str, *, overrides: dict[str, Any] | None = None) -> LeRo
 
     Returns:
         懒加载的 DataSource（调用 ``build()`` / ``__getitem__`` 时才真正打开）。
+        具体类型取决于 ``spec.loader``（如 ``LeRobotDataSource`` /
+        ``DroidRldsDataSource``），均实现相同的 ``build`` / ``__len__`` /
+        ``__getitem__`` / ``action_horizon`` / ``action_dim`` 契约。
     """
     spec = get_dataset_spec(name).merged(overrides)
-    loader_cls = _LOADERS.get(spec.loader)
-    if loader_cls is None:
-        raise KeyError(
-            f"Unknown dataset loader {spec.loader!r} for dataset {name!r}. "
-            f"Available: {sorted(_LOADERS)}"
-        )
+    loader_cls = get_loader(spec.loader)
     return loader_cls(spec)
 
 
-def build_dataset_from_config(data_cfg: Any) -> LeRobotDataSource:
+def build_dataset_from_config(data_cfg: Any) -> Any:
     """从 TaskConfig.data（DataConfig）构建数据源。"""
     if not getattr(data_cfg, "dataset", None):
         raise ValueError("TaskConfig.data.dataset 未设置，无法构建 dataloader。")

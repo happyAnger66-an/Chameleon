@@ -89,3 +89,20 @@ def get_dataset_spec(name: str) -> DatasetSpec:
 
 def list_datasets() -> list[str]:
     return DATASET_REGISTRY.keys()
+
+
+# ---------------------------------------------------------------------------
+# 数据源加载器注册表
+# ---------------------------------------------------------------------------
+# 每个 loader 是一个可被 ``DatasetSpec`` 引用的 DataSource 实现（如 lerobot /
+# droid_rlds）。实现模块在 import 时把自己注册进来，``build_dataset`` 按
+# ``spec.loader`` 查表构建，避免核心工厂硬编码具体后端。
+LOADER_REGISTRY: Registry[str, type] = Registry("dataset_loader")
+
+
+def register_loader(name: str, loader_cls: type, *, override: bool = False) -> type:
+    return LOADER_REGISTRY.register(name, loader_cls, override=override)
+
+
+def get_loader(name: str) -> type:
+    return LOADER_REGISTRY.get(name)

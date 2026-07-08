@@ -36,6 +36,39 @@ def load_cosmos3_host_pipeline(task: TaskConfig, device: str) -> Any:
     return adapter.pipeline
 
 
+def _normalize_pixels(t: torch.Tensor, *, was_int: bool) -> torch.Tensor:
+    """Map pixels to the ``[-1, 1]`` range the Cosmos Wan VAE expects.
+
+    Heuristic (datasets vary): integer / ``max > 1.5`` → treat as ``[0, 255]``;
+    non-negative float ``≤ 1.5`` → treat as ``[0, 1]``; anything already in
+    ``[-1, 1]`` (has negatives) is left untouched.
+    """
+    mx = float(t.abs().max()) if t.numel() else 0.0
+    mn = float(t.min()) if t.numel() else 0.0
+    if was_int or mx > 1.5:
+        return t / 127.5 - 1.0
+    if mn >= -0.01:
+        return t * 2.0 - 1.0
+    return t
+
+
+def _prep_image_frame(img: Any, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Any single frame (HWC / CHW, uint8 / float) → normalized ``[3, H, W]`` tensor."""
+    t = img if isinstance(img, torch.Tensor) else torch.as_tensor(_np_asarray(img))
+    was_int = not torch.is_floating_point(t)
+    t = t.to(device=device).float()
+    if t.ndim == 3 and t.shape[-1] == 3 and t.shape[0] != 3:  # HWC -> CHW
+        t = t.permute(2, 0, 1)
+    t = _normalize_pixels(t, was_int=was_int)
+    return t.to(dtype=dtype)
+
+
+def _np_asarray(x: Any):
+    import numpy as np
+
+    return np.asarray(x)
+
+
 def build_conditioning_canvas(
     pipe: Any,
     profile: Cosmos3Profile,
@@ -46,9 +79,10 @@ def build_conditioning_canvas(
 ) -> torch.Tensor:
     """Return a conditioning canvas ``[1, 3, num_frames, canvas_h, canvas_w]``.
 
-    Accepts ``observation['video']`` (canvas tensor, resized if needed) or
-    ``observation['image']`` (single frame, repeat-padded), else a zero canvas
-    (smoke). The output shape is locked to the fixed profile so it matches the
+    Accepts ``observation['video']`` (canvas tensor ``[3,T,H,W]`` / ``[1,3,T,H,W]``,
+    resized if needed) or ``observation['image']`` (single frame, HWC/CHW & uint8/
+    float, repeat-padded), else a zero canvas (smoke). Pixels are normalized to
+    ``[-1, 1]``. The output shape is locked to the fixed profile so it matches the
     ``vae_encode`` TRT engine input.
     """
     device = torch.device(device)
@@ -56,18 +90,18 @@ def build_conditioning_canvas(
 
     vid = observation.get("video")
     if vid is not None:
-        v = vid if isinstance(vid, torch.Tensor) else torch.as_tensor(vid)
-        v = v.to(device=device, dtype=dtype)
+        v = vid if isinstance(vid, torch.Tensor) else torch.as_tensor(_np_asarray(vid))
+        was_int = not torch.is_floating_point(v)
+        v = v.to(device=device).float()
         if v.ndim == 4:  # [3, T, H, W]
             v = v.unsqueeze(0)
+        v = _normalize_pixels(v, was_int=was_int).to(dtype=dtype)
         return _resize_canvas(v, target, device, dtype)
 
     img = observation.get("image")
     if img is not None:
-        frame = img if isinstance(img, torch.Tensor) else torch.as_tensor(img)
-        frame = frame.to(device=device, dtype=dtype)
-        if frame.ndim == 3:  # [3, H, W]
-            frame = frame.unsqueeze(0)
+        frame = _prep_image_frame(img, device, dtype)  # [3, H, W]
+        frame = frame.unsqueeze(0)  # [1, 3, H, W]
         frame = F.interpolate(
             frame, size=(profile.canvas_h, profile.canvas_w), mode="bilinear", align_corners=False
         )

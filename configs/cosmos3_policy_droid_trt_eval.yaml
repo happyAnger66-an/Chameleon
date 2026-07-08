@@ -35,9 +35,23 @@ deploy:
   backend: cosmos3
   engine_dir: output/cosmos3_policy_droid_trt/engines
 
+# 真实数据集：DROID RLDS（droid_100）。dataset_root 指向 tfds data_dir，即
+# `gsutil cp gs://gresearch/robotics/droid_100 <dir>/droid_100` 后的 <dir>。
+# 需要 tensorflow + tensorflow_datasets（见 dataloader/cosmos3_droid.py）。
+data:
+  dataset: cosmos3_droid
+  dataset_root: ~/robot/datasets
+  start_index: 0
+  num_samples: 32
+
 evaluate:
   policy_runner: cosmos3_trt_only
   compare_mode: false
+  # 评测 + WebUI 可视化（console + web）。浏览器打开 chameleon/evaluate/webui_client。
+  viewer: both
+  num_samples: 32
+  webui_host: 0.0.0.0
+  webui_port: 8000
 
 infer:
   batch_size: 1

@@ -43,7 +43,22 @@ def resolve_trt_precision(task: TaskConfig) -> str:
     return str(task.evaluate.precision or task.model_overrides.get("precision") or "bf16")
 
 
+def _is_cosmos3_runner(task: TaskConfig) -> bool:
+    return str(task.evaluate.policy_runner or "").startswith("cosmos3")
+
+
+def _cosmos3_tensorrt_meta(task: TaskConfig) -> dict[str, str]:
+    from chameleon.deploy.cosmos3.paths import COSMOS3_ENGINE_FILES, resolve_engine_dir as _c3_dir
+
+    meta: dict[str, str] = {"engine_path": str(_c3_dir(task))}
+    for stage, name in COSMOS3_ENGINE_FILES.items():
+        meta[f"{stage}_engine"] = name
+    return meta
+
+
 def tensorrt_meta(task: TaskConfig) -> dict[str, str]:
+    if _is_cosmos3_runner(task):
+        return _cosmos3_tensorrt_meta(task)
     engines = resolve_trt_engine_names(task)
     return {
         "engine_path": str(resolve_engine_dir(task)),
@@ -56,4 +71,8 @@ def tensorrt_meta(task: TaskConfig) -> dict[str, str]:
 
 def should_attach_tensorrt_meta(task: TaskConfig) -> bool:
     ev = task.evaluate
-    return bool(ev.compare_mode or ev.policy_runner in ("trt_only", "pt_trt_compare"))
+    return bool(
+        ev.compare_mode
+        or ev.policy_runner in ("trt_only", "pt_trt_compare")
+        or _is_cosmos3_runner(task)
+    )

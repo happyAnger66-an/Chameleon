@@ -10,6 +10,6 @@
 
 from __future__ import annotations
 
-from chameleon.dataloader.configs import pi05_libero  # noqa: F401
+from chameleon.dataloader.configs import cosmos3_droid, pi05_libero  # noqa: F401
 
-__all__ = ["pi05_libero"]
+__all__ = ["pi05_libero", "cosmos3_droid"]

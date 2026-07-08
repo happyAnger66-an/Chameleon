@@ -2459,6 +2459,14 @@ function connectInternal() {
       el("backend").textContent = meta.backend ?? "-";
       el("actionHorizon").textContent = meta.action_horizon ?? "-";
       el("actionDim").textContent = meta.action_dim ?? "-";
+      // 依据本 run 的 action_dim 自动展开展示维度（如 cosmos3 DROID=10D），
+      // 让全部维度默认可见；用户随后仍可在 dims 输入框覆盖。
+      if (Number.isFinite(meta.action_dim) && meta.action_dim > 0) {
+        const nDims = Math.min(meta.action_dim, 12);
+        state.dims = Array.from({ length: nDims }, (_, i) => i);
+        const dimsInput = el("dims");
+        if (dimsInput) dimsInput.value = state.dims.join(",");
+      }
       applyTensorrtMetaFromMsg(meta);
       applyOnnxrtMetaFromMsg(meta);
       el("gpuUtil").textContent =
