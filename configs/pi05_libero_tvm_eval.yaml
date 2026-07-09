@@ -1,0 +1,69 @@
+# pi05 LIBERO — vit(TRT) + LLM prefill/denoise(TVM, mlc-vla M1) 推理 vs ground-truth。
+#
+# SigLIP vit 复用 TRT engine；PaliGemma 前缀 prefill（expert-0 KV 固化）与 suffix-only
+# denoise（host Euler 10 步）换成 mlc-vla 编译的 TVM engine（prefill + denoise_step_kv）。
+# 预测动作与 LeRobot 真值对比。可与 pi05_libero_trt_eval.yaml / pi05_libero_eval.yaml
+# 的误差横向对比（TVM vs TRT vs PT）。
+#
+# 前置条件：
+#   1. vit TRT engine 已 build（output/pi05_libero_trt/engines/vit.engine）
+#   2. openpi 环境 + 可 import 的 tvm / mlc-vla（PYTHONPATH 注入）
+#
+# 启动：
+#   PYTHONPATH=$TVM_HOME/python:/home/zhangxa/codes/edgeLLM/mlc-vla/python:. \
+#     TVM_LIBRARY_PATH=$TVM_HOME/build/lib \
+#     models/openpi/.venv/bin/python -m chameleon.cli eval \
+#       --config configs/pi05_libero_tvm_eval.yaml
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_libero_tvm_eval
+
+actions:
+  - eval
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+  tvm_dtype: bfloat16
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_trt/onnx
+  engine_dir: output/pi05_libero_trt/engines
+
+infer:
+  num_steps: 10
+  torch_device: cuda
+
+data:
+  dataset: pi05_libero
+  openpi_config: pi05_libero
+  repo_id: your_hf_username/libero
+  start_index: 0
+  num_samples: 20
+
+evaluate:
+  checkpoint_dir: models/openpi/pytorch
+  norm_stats_dir: ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+  asset_id: physical-intelligence/libero
+  policy_runner: tvm_only
+  compare_mode: false
+  engine_dir: output/pi05_libero_trt/engines
+  noise: random
+  precision: bf16
+  trt_cuda_graph: false
+  num_samples: 20
+  stride: 10
+  compare_horizon: null
+  device: cuda
+  pytorch_load_device: cpu
+  viewer: none

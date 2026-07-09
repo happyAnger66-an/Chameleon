@@ -14,6 +14,7 @@ from chameleon.evaluate.cosmos3_pt_trt_compare_runner import Cosmos3PtTrtCompare
 from chameleon.evaluate.cosmos3_trt_runner import Cosmos3TrtPolicyRunner
 from chameleon.evaluate.pt_trt_compare_runner import Pi05PtTrtCompareRunner
 from chameleon.evaluate.trt_only_runner import Pi05TrtOnlyRunner
+from chameleon.evaluate.tvm_only_runner import Pi05TvmOnlyRunner
 from chameleon.evaluate.compare import ActionDiff, compare_actions
 from chameleon.evaluate.lerobot_eval import (
     EvalSampleResult,
