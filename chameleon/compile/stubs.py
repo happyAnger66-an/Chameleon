@@ -55,6 +55,73 @@ class TVMCompiler(_ScaffoldCompiler):
         "Target (amd rocm / llvm cpu); DLight auto-schedule; relax.build -> .so. "
         "Use this path for AMD GPU and generic CPU."
     )
+    #: π0.5 中已由 mlc-vla 落地（TVM Relax nn 前端 + 编译 pipeline）的 stage。
+    _MLC_VLA_STAGES = ("denoise", "action_expert")
+
+    def available(self) -> bool:
+        from chameleon.compile import tvm_mlc_vla
+
+        return tvm_mlc_vla.available()
+
+    def compile(
+        self,
+        graph: Artifact,
+        quant_meta: QuantMetadata | None,
+        ctx: CompileContext,
+        cfg: dict | None = None,
+    ) -> Artifact:
+        stage = graph.stage or (cfg or {}).get("stage")
+        # 第一阶段：只有 denoise stage 走 mlc-vla；其余 stage 仍标注为后续。
+        if stage not in self._MLC_VLA_STAGES:
+            raise NotImplementedError(
+                f"[tvm] stage {stage!r} 尚未落地（vit/llm/去噪环留后续）。"
+                f"当前仅支持 {self._MLC_VLA_STAGES}（经 mlc-vla 编译）。\n"
+                f"Integration plan: {self.plan}"
+            )
+
+        from chameleon.compile import tvm_mlc_vla
+
+        cfg = cfg or {}
+        checkpoint_dir = (
+            cfg.get("checkpoint_dir")
+            or ctx.options.get("checkpoint_dir")
+            or graph.metadata.get("checkpoint_dir")
+        )
+        if not checkpoint_dir:
+            raise ValueError(
+                "[tvm] denoise 编译需要 checkpoint_dir（step.options / ctx.options / graph.metadata）。"
+            )
+        target = tvm_mlc_vla.resolve_target(ctx.platform.device, cfg)
+        # mode: "M0"=每步联合 denoise_step；"M1"=prefix 固化 + suffix-only denoise_step_kv（默认）。
+        mode = str(cfg.get("mode", "M1")).upper()
+        if mode == "M1":
+            meta = tvm_mlc_vla.compile_denoise_kv(
+                checkpoint_dir=str(checkpoint_dir),
+                output_dir=str(ctx.output_dir),
+                target=target,
+                dtype=cfg.get("tvm_dtype"),
+                cuda_graph=bool(cfg.get("cuda_graph", True)),
+                # quant: group 量化预设（如 "q4bf16_1"）；None=fp。M1+ 显存优化选项。
+                quant=cfg.get("quant"),
+                verify=bool(cfg.get("verify", False)),
+                threshold=float(cfg.get("threshold", 0.99)),
+            )
+        else:
+            meta = tvm_mlc_vla.compile_denoise(
+                checkpoint_dir=str(checkpoint_dir),
+                output_dir=str(ctx.output_dir),
+                target=target,
+                dtype=cfg.get("tvm_dtype"),
+                verify=bool(cfg.get("verify", False)),
+                threshold=float(cfg.get("threshold", 0.99)),
+            )
+        return Artifact(
+            kind="engine",
+            stage=stage,
+            platform=ctx.platform.name,
+            path=meta["engine"],
+            metadata=meta,
+        )
 
 
 class HorizonCompiler(_ScaffoldCompiler):
