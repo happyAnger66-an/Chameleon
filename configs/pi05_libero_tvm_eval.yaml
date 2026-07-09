@@ -58,11 +58,12 @@ evaluate:
   policy_runner: tvm_only
   compare_mode: false
   engine_dir: output/pi05_libero_trt/engines
-  noise: random
+  noise: fixed
+  noise_seed: 0
   precision: bf16
   trt_cuda_graph: false
-  num_samples: 20
-  stride: 10
+  num_samples: 10
+  stride: 1
   compare_horizon: null
   device: cuda
   pytorch_load_device: cpu

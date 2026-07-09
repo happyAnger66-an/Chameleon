@@ -48,11 +48,13 @@ evaluate:
   norm_stats_dir: /home/zhangxa/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
   asset_id: physical-intelligence/libero
   policy_runner: openpi          # openpi | chameleon（InferenceSession / Pi05RealOrchestrator）
-  num_samples: 20
+  noise: fixed
+  noise_seed: 0
+  num_samples: 10
   stride: 1
   compare_horizon: null      # 全 action_horizon
   device: cuda
-  viewer: console            # console | webui | both
+  viewer: none               # console | webui | both
   webui_host: 127.0.0.1
   webui_port: 8765
   webui_path: /ws
