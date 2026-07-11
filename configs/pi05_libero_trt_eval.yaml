@@ -45,13 +45,14 @@ infer:
 data:
   dataset: pi05_libero
   openpi_config: pi05_libero
-  repo_id: your_hf_username/libero
+  #repo_id: your_hf_username/libero
+  dataset_root: /root/.cache/huggingface/lerobot/physical-intelligence/libero
   start_index: 0
   num_samples: 20
 
 evaluate:
   checkpoint_dir: models/openpi/pytorch
-  norm_stats_dir: ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+  norm_stats_dir: /root/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
   asset_id: physical-intelligence/libero
   policy_runner: trt_only
   compare_mode: false
@@ -64,7 +65,7 @@ evaluate:
   stride: 1
   compare_horizon: null
   device: cuda
-  pytorch_load_device: cpu   # 权重先加载到 CPU，释放大模块后再在 device 上跑 TRT
+  pytorch_load_device: cuda   # 权重先加载到 CPU，释放大模块后再在 device 上跑 TRT
   viewer: both
   webui_host: 127.0.0.1
   webui_port: 8767
