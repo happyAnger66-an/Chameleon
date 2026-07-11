@@ -1,6 +1,6 @@
 """仅 TVM(mlc-vla M1) 去噪策略运行器 — vit 走 TRT，llm prefill + denoise 走 TVM。
 
-vs ground-truth 单路评测；配合 pt_tvm_compare 做 PT/TVM 双路对比。
+vs ground-truth 单路评测；配合 ``pt_tvm_compare`` 做 PT/TVM 双路对比。
 """
 
 from __future__ import annotations
@@ -40,6 +40,9 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
         self._noise_seed = int(task.evaluate.noise_seed)
         self._num_steps = int(task.infer.num_steps or task.model_overrides.get("num_denoise_steps") or 10)
         self._tvm_dtype = str(task.model_overrides.get("tvm_dtype") or "bfloat16")
+        # 图内整段 Euler 环（denoise_loop_kv）+ 整段 CUDA Graph（消除每步 host↔device / IPC 往返）
+        self._use_loop = bool(task.model_overrides.get("tvm_loop", True))
+        self._cuda_graph = bool(task.model_overrides.get("tvm_cuda_graph", False))
         self._param_bytes = 0
 
     @classmethod
@@ -59,14 +62,28 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
         )
         # TVM 去噪跑在独立 3.12 子进程（tvm_ffi 需 3.12，openpi venv 为 3.11）
         self._tvm_client = TvmWorkerClient(
-            self._session.checkpoint_dir, dtype=self._tvm_dtype, target="cuda",
+            self._session.checkpoint_dir,
+            dtype=self._tvm_dtype,
+            target="cuda",
+            cuda_graph=self._cuda_graph,
         )
         self._param_bytes = self._tvm_client.param_bytes
-        pipeline = Pi05TvmPipeline(self._tvm_client, vit, num_steps=self._num_steps)
+        pipeline = Pi05TvmPipeline(
+            self._tvm_client,
+            vit,
+            num_steps=self._num_steps,
+            use_loop=self._use_loop,
+        )
         attach_tvm_to_policy(self._session.policy, pipeline)
         logger.info(
-            "Pi05TvmOnlyRunner built: checkpoint=%s dtype=%s num_steps=%d denoise_param=%.1fMB",
-            self._session.checkpoint_dir, self._tvm_dtype, self._num_steps, self._param_bytes / 1e6,
+            "Pi05TvmOnlyRunner built: checkpoint=%s dtype=%s num_steps=%d "
+            "loop=%s cuda_graph=%s denoise_param=%.1fMB",
+            self._session.checkpoint_dir,
+            self._tvm_dtype,
+            self._num_steps,
+            self._use_loop,
+            self._cuda_graph,
+            self._param_bytes / 1e6,
         )
         self._built = True
         return self
@@ -100,14 +117,21 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
 
     @property
     def metadata(self) -> dict[str, Any]:
+        denoise = (
+            "mlc-vla M1 (prefill + denoise_loop_kv)"
+            if self._use_loop
+            else "mlc-vla M1 (prefill + denoise_step_kv, host Euler)"
+        )
         return {
             "backend": "tvm_only",
             "compare_mode": False,
-            "denoise_backend": "mlc-vla M1 (prefill + denoise_step_kv, host Euler)",
+            "denoise_backend": denoise,
             "vit_backend": "tensorrt",
             "openpi_config": resolve_openpi_config(self._task),
             "checkpoint_dir": str(resolve_checkpoint_dir(self._task)),
             "tvm_dtype": self._tvm_dtype,
+            "tvm_loop": self._use_loop,
+            "tvm_cuda_graph": self._cuda_graph,
             "denoise_param_bytes": int(self._param_bytes),
             "noise": self._noise_mode,
             "noise_seed": self._noise_seed,

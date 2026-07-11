@@ -235,8 +235,8 @@ class EvaluateConfig(BaseModel):
     复用 openpi ``create_trained_policy``（含 norm / tokenize / 输入输出
     transform），逐帧推理后用 ``evaluate.compare_actions`` 计算误差并汇总。
 
-    ``compare_mode=true`` + ``policy_runner=pt_trt_compare`` 时启用 PyTorch 浮点
-    vs TensorRT engine 双路对比（WebUI 展示 ``pred_action`` / ``pred_action_trt``）。
+    ``compare_mode=true`` + ``policy_runner=pt_trt_compare`` / ``pt_tvm_compare``
+    时启用 PyTorch 浮点 vs TensorRT / TVM 双路对比（WebUI 展示两路预测与差值）。
     """
 
     checkpoint_dir: str | None = None
@@ -267,14 +267,16 @@ class EvaluateConfig(BaseModel):
 
     pytorch_load_device: str | None = "cpu"
     """openpi Policy 构建时 PyTorch 权重加载设备（``trt_only`` / ``pt_trt_compare`` TRT 路、
-    ``chameleon`` + ``use_compiled_engines`` 时生效）。默认 ``cpu`` 以在挂载 TRT engine 前
-    避免 GPU OOM；推理仍使用 ``device``。"""
+    ``tvm_only`` / ``pt_tvm_compare`` TVM 壳、``chameleon`` + ``use_compiled_engines`` 时生效）。
+    默认 ``cpu`` 以在挂载 engine 前避免 GPU OOM；推理仍使用 ``device``。
+    ``pt_tvm_compare`` 的 PT 路优先读 ``model_overrides.pt_device``，未设时回退本字段。"""
 
     policy_runner: str = "openpi"
-    """策略运行器：``openpi`` | ``chameleon`` | ``pt_trt_compare`` | ``trt_only``。"""
+    """策略运行器：``openpi`` | ``chameleon`` | ``pt_trt_compare`` | ``trt_only`` |
+    ``tvm_only`` | ``pt_tvm_compare``。"""
 
     compare_mode: bool = False
-    """PyTorch 浮点 vs TensorRT engine 双路对比（须 ``policy_runner=pt_trt_compare``）。"""
+    """双路对比（须 ``policy_runner=pt_trt_compare`` 或 ``pt_tvm_compare``）。"""
 
     engine_dir: str | None = None
     """TRT engine 目录；缺省 ``deploy.engine_dir`` 或 ``{output_dir}/engines``。"""

@@ -1,9 +1,10 @@
-# pi05 LIBERO — vit(TRT) + LLM prefill/denoise(TVM, mlc-vla M1) 推理 vs ground-truth。
+# pi05 LIBERO — PyTorch 浮点 vs TVM(mlc-vla M1) 双路对比 + WebUI。
 #
-# SigLIP vit 复用 TRT engine；PaliGemma 前缀 prefill（expert-0 KV 固化）与 suffix-only
-# denoise（默认图内 denoise_loop_kv，10 步）换成 mlc-vla 编译的 TVM engine。
-# 预测动作与 LeRobot 真值对比。可与 pi05_libero_trt_eval.yaml / pi05_libero_eval.yaml
-# 的误差横向对比（TVM vs TRT vs PT）；双路对比见 pi05_libero_tvm_compare.yaml。
+# vit 复用 TRT engine；LLM prefill + denoise 走 mlc-vla（图内 denoise_loop_kv）。
+# 两路共用 fixed noise，WebUI 显示 pred_pt / pred_tvm 及 PT−TVM 差异。
+#
+# 显存：默认 PT 在 CPU（model_overrides.pt_device / evaluate.pytorch_load_device），
+# GPU 留给 vit+TVM。显存充足时可设 pt_device: cuda（同卡有 OOM 风险）。
 #
 # 前置条件：
 #   1. vit TRT engine 已 build（output/pi05_libero_trt/engines/vit.engine）
@@ -15,12 +16,15 @@
 #   export MLC_VLA_PY=/usr/bin/python3.12
 #   export TVM_LIBRARY_PATH=$TVM_HOME/build/lib
 #   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli eval \
-#       --config configs/pi05_libero_tvm_eval.yaml
+#       --config configs/pi05_libero_tvm_compare.yaml
+#
+# WebUI（另开终端）：
+#   cd chameleon/evaluate/webui_client && python -m http.server 8080 --bind 0.0.0.0
 
 architecture: pi05
 model: pi05
 platform: nvidia_ada
-output_dir: output/pi05_libero_tvm_eval
+output_dir: output/pi05_libero_tvm_compare
 
 actions:
   - eval
@@ -33,13 +37,14 @@ model_overrides:
   paligemma_variant: gemma_2b
   action_expert_variant: gemma_300m
   precision: bfloat16
-  # fp16 优于 bf16：bf16 尾数仅 7 位且 TVM/dlight 的 bf16 GEMM 累加精度低于 TRT 的 fp32 累加，
-  # 10 步 Euler + 18 层 prefill 累积后 max_abs 0.176。fp16(尾数 10 位) 降到 0.079(逼近 TRT 0.070)，且更快。
+  # fp16：精度逼近 TRT，且快于 bf16（见 mlc-vla/docs/M1.md）
   tvm_dtype: float16
-  # 图内整段 Euler 环（denoise_loop_kv），消除每步 host↔device / 跨进程 IPC
+  # 图内整段 Euler 环（消除每步 host↔device / IPC）
   tvm_loop: true
-  # 整段去噪环 CUDA Graph（需 tvm_loop=true）；首次编译较慢，稳态更快
-  tvm_cuda_graph: true
+  # compare 双路同卡时 runner 会强制关闭；单路 tvm_only 可开
+  tvm_cuda_graph: false
+  # PT 路设备（默认 cpu，避免与 TVM 抢显存；显存够可改 cuda）
+  pt_device: cuda
 
 deploy:
   backend: pi05
@@ -64,8 +69,8 @@ evaluate:
   checkpoint_dir: models/openpi/pytorch
   norm_stats_dir: ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
   asset_id: physical-intelligence/libero
-  policy_runner: tvm_only
-  compare_mode: false
+  policy_runner: pt_tvm_compare
+  compare_mode: true
   engine_dir: output/pi05_libero_trt/engines
   noise: fixed
   noise_seed: 0
@@ -75,5 +80,11 @@ evaluate:
   stride: 1
   compare_horizon: null
   device: cuda
+  # 未设 model_overrides.pt_device 时，PT 路回退到此（默认 cpu）
   pytorch_load_device: cpu
-  viewer: none
+  viewer: both
+  webui_host: 0.0.0.0
+  webui_port: 8768
+  webui_path: /ws
+  webui_history_size: 200
+  webui_show_wrist: true

@@ -38,13 +38,17 @@ class TvmWorkerClient:
     """管理 3.12 TVM worker 子进程，转发 prefill+denoise 请求。"""
 
     def __init__(self, checkpoint_dir: str | Path, *, dtype: str = "bfloat16",
-                 target: str = "cuda", python_exe: str | None = None):
+                 target: str = "cuda", python_exe: str | None = None,
+                 cuda_graph: bool = False):
         self.python_exe = python_exe or os.environ.get("MLC_VLA_PY", "python3")
+        self.cuda_graph = cuda_graph
         worker_mod = "chameleon.runtime.pi05_tvm.worker"
         # worker 只依赖 mlc_vla+tvm，但用 -m 需能 import chameleon 包 → 直接跑文件路径更稳。
         worker_file = str(Path(__file__).with_name("worker.py"))
         cmd = [self.python_exe, "-u", worker_file,
                "--checkpoint-dir", str(checkpoint_dir), "--dtype", dtype, "--target", target]
+        if cuda_graph:
+            cmd.append("--cuda-graph")
         logger.info("Launching TVM worker: %s", " ".join(cmd))
         self.proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -75,13 +79,14 @@ class TvmWorkerClient:
         return pickle.loads(self.proc.stdout.read(n))
 
     def sample(self, prefix_embs: np.ndarray, prefix_pad: np.ndarray,
-               noise: np.ndarray, num_steps: int) -> np.ndarray:
+               noise: np.ndarray, num_steps: int, loop: bool = True) -> np.ndarray:
         self._send({
             "op": "sample",
             "prefix_embs": np.ascontiguousarray(prefix_embs, dtype=np.float32),
             "prefix_pad": np.ascontiguousarray(prefix_pad, dtype=np.float32),
             "noise": np.ascontiguousarray(noise, dtype=np.float32),
             "num_steps": int(num_steps),
+            "loop": bool(loop),
         })
         r = self._recv()
         if not r.get("ok"):

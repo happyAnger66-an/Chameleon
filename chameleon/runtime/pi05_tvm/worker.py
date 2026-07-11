@@ -39,6 +39,8 @@ def main() -> None:
     ap.add_argument("--checkpoint-dir", required=True)
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--target", default="cuda")
+    ap.add_argument("--cuda-graph", action="store_true",
+                    help="开启整段去噪环的 CUDA Graph 捕获（配合图内环 denoise_loop_kv）")
     args = ap.parse_args()
 
     stdin = sys.stdin.buffer
@@ -50,7 +52,7 @@ def main() -> None:
         from pathlib import Path
 
         config = Pi0Config.from_openpi_config(args.checkpoint_dir, dtype=args.dtype)
-        runner = PiZeroRunner(config, args.target)
+        runner = PiZeroRunner(config, args.target, cuda_graph=args.cuda_graph)
         ckpt_file = Path(args.checkpoint_dir) / "model.safetensors"
         raw = pi0_loader.load_safetensors(str(ckpt_file), dtype="float32")
         src = pi0_loader.load_params(config, raw, named_params=runner.named_params, dtype=args.dtype)
@@ -69,6 +71,8 @@ def main() -> None:
         "suffix_len": int(config.suffix_len),
         "action_horizon": int(config.action_horizon),
         "action_dim": int(config.action_dim),
+        "num_denoise_steps": int(config.num_denoise_steps),
+        "cuda_graph": bool(args.cuda_graph),
         "param_bytes": param_bytes,
     })
 
@@ -78,13 +82,20 @@ def main() -> None:
             break
         try:
             if req["op"] == "sample":
-                actions = runner.sample(
-                    params,
-                    req["prefix_embs"],
-                    noise=req.get("noise"),
-                    num_steps=int(req.get("num_steps", 10)),
-                    prefix_pad=req.get("prefix_pad"),
-                )
+                num_steps = int(req.get("num_steps", config.num_denoise_steps))
+                # loop=True 且步数与编译期一致 → 走图内整段 Euler 环（可整段 CUDA Graph）
+                use_loop = bool(req.get("loop", True)) and num_steps == config.num_denoise_steps
+                if use_loop:
+                    actions = runner.sample_graph(
+                        params, req["prefix_embs"],
+                        noise=req.get("noise"), prefix_pad=req.get("prefix_pad"),
+                    )
+                else:
+                    actions = runner.sample(
+                        params, req["prefix_embs"],
+                        noise=req.get("noise"), num_steps=num_steps,
+                        prefix_pad=req.get("prefix_pad"),
+                    )
                 _send(stdout, {"ok": True, "actions": actions})
             else:
                 _send(stdout, {"ok": False, "error": f"unknown op {req.get('op')!r}"})

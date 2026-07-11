@@ -71,8 +71,12 @@ def tensorrt_meta(task: TaskConfig) -> dict[str, str]:
 
 def should_attach_tensorrt_meta(task: TaskConfig) -> bool:
     ev = task.evaluate
+    runner = str(ev.policy_runner or "")
+    # TVM 路径只复用 vit.engine，不挂完整 TRT stage meta
+    if runner in ("tvm_only", "pt_tvm_compare"):
+        return False
     return bool(
         ev.compare_mode
-        or ev.policy_runner in ("trt_only", "pt_trt_compare")
+        or runner in ("trt_only", "pt_trt_compare")
         or _is_cosmos3_runner(task)
     )

@@ -1,11 +1,12 @@
-"""pi05 TVM 去噪管线 — vit(TRT) 前缀嵌入 → mlc-vla TVM prefill + host Euler denoise。
+"""pi05 TVM 去噪管线 — vit(TRT) 前缀嵌入 → mlc-vla TVM prefill + 图内/宿主 Euler denoise。
 
 与 ``Pi05TrtPipeline`` 相比：
 - 前缀嵌入（SigLIP vit + 语言 embedding + pad/att mask）完全复用 TRT 路径的 ``_embed_prefix_trt``，
   保证与 openpi 一致；
 - LLM prefill（TRT ``llm.engine``）与 TRT ``denoise.engine`` 换成 mlc-vla M1：
-  expert-0 ``prefill(prefix_embs, prefix_mask)`` 固化逐层 prefix K/V，随后 host Euler 环里
-  逐步调 ``denoise_step_kv``（suffix RoPE offset = 有效 prefix 长度，padded prefix 列被 mask 屏蔽）。
+  expert-0 ``prefill(prefix_embs, prefix_mask)`` 固化逐层 prefix K/V；
+  默认 ``use_loop=True`` 走图内 ``denoise_loop_kv``（整段 Euler，可 CUDA Graph）；
+  否则宿主逐步调 ``denoise_step_kv``（suffix RoPE offset = 有效 prefix 长度）。
 """
 
 from __future__ import annotations
@@ -33,10 +34,12 @@ class Pi05TvmPipeline:
         *,
         num_steps: int = 10,
         static_prefix_len: int = PI05_LIBERO_PREFIX_LEN,
+        use_loop: bool = True,
     ) -> None:
         self._tvm = tvm_client
         self._vit = vit_engine
         self._num_steps = num_steps
+        self._use_loop = bool(use_loop)
         self._static_prefix_len = int(static_prefix_len)
         cfg_pl = int(tvm_client.info["prefix_len"])
         if cfg_pl != self._static_prefix_len:
@@ -83,7 +86,7 @@ class Pi05TvmPipeline:
         pad_np = prefix_pad_masks.detach().cpu().numpy().reshape(-1).astype("float32")  # [P]
         noise_np = noise.detach().to(torch.float32).cpu().numpy()  # [1,H,D]
 
-        actions = self._tvm.sample(prefix_np, pad_np, noise_np, steps)  # [1,H,D] fp32
+        actions = self._tvm.sample(prefix_np, pad_np, noise_np, steps, loop=self._use_loop)  # [1,H,D] fp32
         return torch.from_numpy(np.asarray(actions)).to(dev)
 
 
