@@ -30,6 +30,7 @@ from chameleon.dataloader.lerobot import (
 
 # 触发数据集注册（import 副作用）。
 from chameleon.dataloader import configs as _configs  # noqa: F401,E402
+from chameleon.dataloader import asr_audio as _asr_audio  # noqa: F401,E402
 
 __all__ = [
     "ChameleonSample",

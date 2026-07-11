@@ -12,6 +12,7 @@ from chameleon.runtime.base import (
 # Import-time registration of built-in runtimes and orchestrators.
 from chameleon.runtime import pytorch  # noqa: F401,E402
 from chameleon.runtime import tensorrt  # noqa: F401,E402
+from chameleon.runtime import edgellm  # noqa: F401,E402
 from chameleon.runtime.orchestrator import (  # noqa: E402
     ORCHESTRATOR_REGISTRY,
     InferenceSession,

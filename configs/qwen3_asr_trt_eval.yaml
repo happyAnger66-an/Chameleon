@@ -1,0 +1,46 @@
+# Qwen3-ASR — Edge-LLM engine 离线 WER（LibriSpeech test-clean）。
+#
+# 前置：engines 已 build（见 configs/qwen3_asr_trt_deploy.yaml）
+#
+# 启动：
+#   PYTHONPATH=. python -m chameleon.cli eval --config configs/qwen3_asr_trt_eval.yaml
+
+architecture: qwen3_asr
+model: qwen3_asr_0.6b
+platform: nvidia_ada
+output_dir: output/qwen3_asr_0.6b
+
+actions:
+  - eval
+
+model_overrides:
+  checkpoint: ~/models/Qwen3-ASR-0.6B
+
+deploy:
+  backend: qwen3_asr
+  engine_dir: output/qwen3_asr_0.6b/engines
+  # edgellm_home: ~/codes/TensorRT-Edge-LLM
+
+data:
+  dataset: librispeech_test_clean
+  start_index: 0
+  num_samples: 50
+
+asr:
+  language: English
+  max_new_tokens: 256
+  # audio: ~/datasets/asr/sample.wav   # for chameleon infer / stream
+
+evaluate:
+  policy_runner: qwen3_asr_edgellm
+  num_samples: 50
+  stride: 1
+  viewer: console
+  webui_host: 127.0.0.1
+  webui_port: 8768
+
+stream:
+  source: file
+  chunk_size_sec: 2.0
+  unfixed_chunk_num: 2
+  unfixed_token_num: 5

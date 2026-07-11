@@ -16,8 +16,13 @@ def infer_cli(argv: list[str] | None = None) -> int:
     configure_logging(verbose=args.verbose)
 
     task = load_task(args)
-    actions = run_infer(task)
-    print(f"action shape: {tuple(actions.shape)}")
-    print(f"action mean:  {actions.float().mean().item():.6f}")
-    print(f"action std:   {actions.float().std().item():.6f}")
+    out = run_infer(task)
+    if isinstance(out, dict) and "text" in out:
+        lang = out.get("language") or ""
+        print(f"language: {lang}")
+        print(f"text:     {out.get('text') or ''}")
+        return 0
+    print(f"action shape: {tuple(out.shape)}")
+    print(f"action mean:  {out.float().mean().item():.6f}")
+    print(f"action std:   {out.float().std().item():.6f}")
     return 0

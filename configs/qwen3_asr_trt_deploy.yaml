@@ -1,0 +1,38 @@
+# Qwen3-ASR — Edge-LLM export + audio_build / llm_build.
+#
+# 前置：
+#   export TENSORRT_EDGELLM_HOME=/path/to/TensorRT-Edge-LLM
+#   Edge-LLM 已编译 audio_build / llm_build
+#
+# 启动：
+#   PYTHONPATH=. python -m chameleon.cli workflow --config configs/qwen3_asr_trt_deploy.yaml
+
+architecture: qwen3_asr
+model: qwen3_asr_0.6b
+platform: nvidia_ada
+output_dir: output/qwen3_asr_0.6b
+
+actions:
+  - export
+  - compile
+
+model_overrides:
+  checkpoint: ~/models/Qwen3-ASR-0.6B
+  dtype: fp16
+
+deploy:
+  backend: qwen3_asr
+  # edgellm_home: ~/codes/TensorRT-Edge-LLM   # or TENSORRT_EDGELLM_HOME
+  export_dir: output/qwen3_asr_0.6b/onnx
+  engine_dir: output/qwen3_asr_0.6b/engines
+  build_cfgs:
+    audio_encoder: qwen3_asr_audio_build_cfg.py
+    llm: qwen3_asr_llm_build_cfg.py
+
+export:
+  - stage: audio_encoder
+  - stage: llm
+
+compile:
+  - stage: audio_encoder
+  - stage: llm

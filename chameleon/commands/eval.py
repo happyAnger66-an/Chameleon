@@ -1,4 +1,4 @@
-"""eval 子命令 — LeRobot 离线动作评测。"""
+"""eval 子命令 — LeRobot 动作评测 / ASR WER 评测。"""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from chameleon.commands.common import add_config_arguments, add_global_arguments
 def eval_cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="chameleon eval",
-        description="Evaluate predicted vs ground-truth actions on a LeRobot dataset.",
+        description="Evaluate policy actions (LeRobot) or ASR WER on a dataset.",
     )
     add_global_arguments(parser)
     add_config_arguments(parser)
-    parser.add_argument("--num-samples", type=int, default=None, help="Override evaluated frame count.")
+    parser.add_argument("--num-samples", type=int, default=None, help="Override evaluated sample count.")
     parser.add_argument(
         "--checkpoint-dir",
         default=None,
@@ -23,9 +23,8 @@ def eval_cli(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--policy-runner",
-        choices=["openpi", "chameleon"],
         default=None,
-        help="Policy backend: openpi (Policy.infer) or chameleon (InferenceSession).",
+        help="Runner name (openpi / chameleon / qwen3_asr_edgellm / …).",
     )
     parser.add_argument(
         "--viewer",
@@ -51,5 +50,9 @@ def eval_cli(argv: list[str] | None = None) -> int:
     sync_eval_num_samples(task)
 
     summary = run_eval(task)
-    print(summary.describe())
+    describe = getattr(summary, "describe", None)
+    if callable(describe):
+        print(describe())
+    else:
+        print(summary)
     return 0

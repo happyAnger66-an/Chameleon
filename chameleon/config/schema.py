@@ -71,6 +71,9 @@ class DeployConfig(BaseModel):
     use_cudagraph: bool = False
     """TRT build 是否启用 ``BuilderFlag.CUDA_GRAPH``。"""
 
+    edgellm_home: str | None = None
+    """TensorRT-Edge-LLM 安装/构建目录；缺省读 ``TENSORRT_EDGELLM_HOME``。"""
+
 
 class CompileStep(BaseModel):
     stage: str
@@ -325,6 +328,32 @@ class EvaluateConfig(BaseModel):
     """观测图像 JPEG 质量（1–100）。"""
 
 
+class AsrConfig(BaseModel):
+    """ASR 任务参数（``architecture=qwen3_asr``）。"""
+
+    language: str | None = None
+    """强制语种（canonical 名，如 ``English``）；None=自动检测。"""
+
+    context: str = ""
+    """system context（热词 / 领域提示）。"""
+
+    max_new_tokens: int = 256
+    audio: str | None = None
+    """infer / stream 单条冒烟用的音频路径。"""
+
+
+class StreamConfig(BaseModel):
+    """流式推理参数（``actions`` 含 ``stream`` 时生效）。"""
+
+    chunk_size_sec: float = 2.0
+    unfixed_chunk_num: int = 2
+    unfixed_token_num: int = 5
+    source: str = "file"
+    """``file`` | ``mic``。"""
+    token_stream: bool = True
+    """是否尝试启用 Edge-LLM StreamChannel（pybind 可用时）。"""
+
+
 class TaskConfig(BaseModel):
     architecture: str = "pi05"
     model: str = "pi05"
@@ -332,7 +361,7 @@ class TaskConfig(BaseModel):
     output_dir: str = "output/chameleon_run"
 
     actions: list[str] = Field(default_factory=lambda: ["infer"])
-    """Ordered subset of ``quantize | export | compile | trt_profile | infer``."""
+    """Ordered subset of ``quantize | export | compile | trt_profile | infer | stream``."""
 
     model_overrides: dict[str, Any] = Field(default_factory=dict)
     """Overrides applied to the model adapter config (e.g. action_dim)."""
@@ -357,6 +386,10 @@ class TaskConfig(BaseModel):
     """Real-dataset config consumed by the dataloader / evaluate paths."""
     evaluate: EvaluateConfig = Field(default_factory=EvaluateConfig)
     """Evaluation config consumed by the ``eval`` action / CLI subcommand."""
+    asr: AsrConfig = Field(default_factory=AsrConfig)
+    """ASR 参数（qwen3_asr）。"""
+    stream: StreamConfig = Field(default_factory=StreamConfig)
+    """流式 demo 参数。"""
 
     @classmethod
     def load(cls, path: str | Path) -> "TaskConfig":

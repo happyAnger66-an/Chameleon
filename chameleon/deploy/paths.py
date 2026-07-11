@@ -65,7 +65,7 @@ def resolve_checkpoint_dir(task: TaskConfig) -> Path:
 
     raise ValueError(
         "deploy.checkpoint_dir / evaluate.checkpoint_dir / model_overrides.checkpoint "
-        "required for pi05 export/build."
+        "required for export/build."
     )
 
 

@@ -67,6 +67,20 @@ def _run_context(task: TaskConfig) -> RunContext:
     return RunContext(platform=platform, architecture=task.architecture, options=options)
 
 
+def _is_asr_task(task: TaskConfig) -> bool:
+    """True when architecture/model/runner indicates ASR (qwen3_asr)."""
+    arch = (task.architecture or "").strip().lower()
+    model = (task.model or "").strip().lower()
+    if arch.startswith("qwen3_asr") or model.startswith("qwen3_asr"):
+        return True
+    runner = getattr(task.evaluate, "policy_runner", None)
+    if runner:
+        from chameleon.evaluate import is_asr_runner_name
+
+        return is_asr_runner_name(runner)
+    return False
+
+
 def run_infer(
     task: TaskConfig,
     *,
@@ -77,13 +91,16 @@ def run_infer(
 
     For action models (pi05, cosmos3 ``mode=action``) this is the action chunk
     ``[B, horizon, action_dim]``; for cosmos3 ``mode=video`` it is the generated
-    video tensor ``[B, T, C, H, W]`` (or a latent proxy). Richer multimodal
-    outputs (sound / full pipeline output) are exposed on the orchestrator.
+    video tensor ``[B, T, C, H, W]`` (or a latent proxy). For ``qwen3_asr`` this
+    is a dict ``{text, language, raw_text, metrics}``.
 
     ``stage_artifacts`` injects compiled engines (closing the compile->infer loop);
     ``stage_runtimes`` overrides the per-stage runtime (e.g. ``tensorrt`` for
     stages that have an engine), otherwise the task's ``stage_runtimes`` is used.
     """
+    if _is_asr_task(task):
+        return _run_infer_asr(task)
+
     ctx = _run_context(task)
     adapter = build_adapter(task, device=ctx.torch_device)
     observation = adapter.example_observation(task.infer.batch_size, device=ctx.torch_device)
@@ -94,17 +111,44 @@ def run_infer(
     return session.infer(observation)
 
 
-def run_eval(task: TaskConfig):
-    """在真实 LeRobot 数据上评测 pi05：逐帧对比预测动作与 ground-truth。
+def _run_infer_asr(task: TaskConfig) -> dict[str, Any]:
+    """Single-utterance ASR via AsrRunner (Edge-LLM engines)."""
+    from chameleon.evaluate import build_asr_runner
 
-    通过 ``evaluate.policy_runner`` 选择后端（``openpi`` / ``chameleon``），
-    复用 dataloader + PolicyRunner registry。
-    ``evaluate.viewer`` 为 ``webui`` / ``both`` 时启动 WebSocket 服务，
-    推理线程仅非阻塞投递事件，JPEG 编码在 asyncio 消费侧完成。
+    audio = task.asr.audio or (task.model_overrides or {}).get("audio")
+    if not audio:
+        raise ValueError(
+            "qwen3_asr infer needs asr.audio or model_overrides.audio (wav/mp3/flac path)."
+        )
+    runner = build_asr_runner(task)
+    result = runner.transcribe(
+        str(audio),
+        context=task.asr.context,
+        language=task.asr.language,
+    )
+    return {
+        "text": result.text,
+        "language": result.language,
+        "raw_text": result.raw_text,
+        "metrics": dict(result.metrics or {}),
+    }
+
+
+def run_eval(task: TaskConfig):
+    """评测入口：ASR 走 WER；VLA 走 LeRobot 动作对比。
+
+    通过 ``evaluate.policy_runner`` 先查 ``ASR_RUNNER_REGISTRY``，再查
+    ``POLICY_RUNNER_REGISTRY``。VLA 路径下 ``evaluate.viewer`` 为
+    ``webui`` / ``both`` 时启动 WebSocket 服务。
     """
+    from chameleon.evaluate import is_asr_runner_name
     from chameleon.evaluate.task_utils import sync_eval_num_samples
 
     sync_eval_num_samples(task)
+
+    runner_name = getattr(task.evaluate, "policy_runner", None)
+    if _is_asr_task(task) or is_asr_runner_name(runner_name):
+        return _run_eval_asr(task)
 
     viewer = (task.evaluate.viewer or "console").strip().lower()
     if viewer in ("webui", "both"):
@@ -165,6 +209,109 @@ def run_eval(task: TaskConfig):
         run_meta=meta,
         run_id=run_id,
     )
+
+
+def _run_eval_asr(task: TaskConfig):
+    """LibriSpeech / manifest ASR WER 评测。"""
+    from chameleon.dataloader import build_dataset_from_config
+    from chameleon.evaluate import build_asr_runner, evaluate_asr
+
+    data_cfg = task.data
+    if not getattr(data_cfg, "dataset", None):
+        raise ValueError("ASR eval 需要 task.data.dataset（如 librispeech_test_clean）。")
+
+    viewer = (task.evaluate.viewer or "console").strip().lower()
+    if viewer in ("webui", "both"):
+        logger.warning(
+            "ASR eval viewer=%s: offline WER uses console; live text UI is via "
+            "`chameleon stream` (fixed/pending regions).",
+            viewer,
+        )
+
+    data_source = build_dataset_from_config(data_cfg)
+    data_source.build()
+    runner = build_asr_runner(task)
+    return evaluate_asr(
+        data_source,
+        runner,
+        num_samples=int(task.evaluate.num_samples),
+        stride=int(task.evaluate.stride or 1),
+    )
+
+
+def run_stream(
+    task: TaskConfig,
+    *,
+    on_update: Any | None = None,
+) -> dict[str, Any]:
+    """Streaming ASR V1: chunk re-feed + prefix rollback.
+
+    Feeds ``asr.audio`` (or mic) in ``stream.chunk_size_sec`` windows, calling
+    Edge-LLM on the accumulated wav each time. ``on_update`` receives dicts with
+    ``fixed_text`` / ``pending_text`` for console or WebUI.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from chameleon.evaluate import build_asr_runner
+    from chameleon.runtime.edgellm.streaming import (
+        AsrStreamingState,
+        feed_pcm,
+        finish_stream,
+        load_audio_pcm,
+    )
+
+    if not _is_asr_task(task):
+        raise ValueError("run_stream is only supported for architecture/model qwen3_asr")
+
+    audio_path = task.asr.audio or (task.model_overrides or {}).get("audio")
+    source = (task.stream.source or "file").strip().lower()
+    if source == "mic":
+        raise NotImplementedError(
+            "stream.source=mic not implemented yet; use source=file with asr.audio"
+        )
+    if not audio_path:
+        raise ValueError("stream needs asr.audio (wav path) when stream.source=file")
+
+    runner = build_asr_runner(task)
+    tokenizer = None
+    ckpt = (task.model_overrides or {}).get("checkpoint")
+    if ckpt:
+        try:
+            from transformers import AutoTokenizer
+
+            tokenizer = AutoTokenizer.from_pretrained(str(ckpt), trust_remote_code=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stream: tokenizer load failed (%s); whitespace rollback", exc)
+
+    state = AsrStreamingState(
+        unfixed_chunk_num=int(task.stream.unfixed_chunk_num),
+        unfixed_token_num=int(task.stream.unfixed_token_num),
+        chunk_size_sec=float(task.stream.chunk_size_sec),
+        force_language=task.asr.language,
+        base_context=task.asr.context or "",
+        tokenizer=tokenizer,
+    )
+
+    def infer_fn(path: str, context: str, language: str | None) -> str:
+        out = runner.transcribe(path, context=context, language=language)
+        return out.raw_text or out.text
+
+    pcm = load_audio_pcm(audio_path, sample_rate=state.sample_rate)
+    # Feed in ~chunk-sized slices so buffer logic matches realtime arrival.
+    step = state.chunk_size_samples
+    with tempfile.TemporaryDirectory(prefix="chameleon_asr_stream_") as td:
+        tmp = Path(td)
+        for i in range(0, len(pcm), step):
+            feed_pcm(state, pcm[i : i + step], infer_fn, tmp_dir=tmp, on_update=on_update)
+        finish_stream(state, infer_fn, tmp_dir=tmp, on_update=on_update)
+
+    return {
+        "text": state.text,
+        "language": state.language,
+        "raw_text": state._raw_decoded,
+        "chunk_id": state.chunk_id,
+    }
 
 
 def get_dataset_openpi_config(dataset_name: str) -> str:

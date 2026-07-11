@@ -20,6 +20,7 @@ from chameleon.models.base import (
 # Import-time registration of built-in model adapters.
 from . import pi05  # noqa: F401
 from . import cosmos3  # noqa: F401
+from . import qwen3_asr  # noqa: F401
 
 __all__ = [
     "MODEL_REGISTRY",

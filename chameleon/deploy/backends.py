@@ -57,6 +57,23 @@ class _Cosmos3DeployBackend:
         return run_cosmos3_build(task, manifest)
 
 
+class _Qwen3AsrDeployBackend:
+    name = "qwen3_asr"
+    aliases = ("qwen3_asr_edgellm",)
+    uses_dedicated_build = True
+    default_export_stages = ("audio_encoder", "llm")
+
+    def export(self, task: "TaskConfig", manifest: "Manifest") -> dict[str, "Artifact"]:
+        from chameleon.deploy.qwen3_asr_edgellm import run_qwen3_asr_export
+
+        return run_qwen3_asr_export(task, manifest)
+
+    def build(self, task: "TaskConfig", manifest: "Manifest") -> dict[str, "Artifact"]:
+        from chameleon.deploy.qwen3_asr_edgellm import run_qwen3_asr_build
+
+        return run_qwen3_asr_build(task, manifest)
+
+
 class _ReferenceDeployBackend:
     """参考适配器路径：export 由 run_compile（capture→ONNX）承担，无专用 build。"""
 
@@ -81,6 +98,7 @@ class _ReferenceDeployBackend:
 
 register_deploy_backend(_Pi05DeployBackend())
 register_deploy_backend(_Cosmos3DeployBackend())
+register_deploy_backend(_Qwen3AsrDeployBackend())
 register_deploy_backend(_ReferenceDeployBackend())
 
 
@@ -97,6 +115,10 @@ def is_cosmos3_deploy_backend(backend: str | None) -> bool:
     return _family(backend) == "cosmos3"
 
 
+def is_qwen3_asr_deploy_backend(backend: str | None) -> bool:
+    return _family(backend) == "qwen3_asr"
+
+
 def is_dedicated_deploy_backend(backend: str | None) -> bool:
     """是否为带专用 export/build 的后端（compile 走 run_deploy_build）。"""
     be = deploy_backend_or_none(backend)
@@ -107,5 +129,6 @@ __all__ = [
     "DEPLOY_BACKEND_REGISTRY",
     "is_pi05_deploy_backend",
     "is_cosmos3_deploy_backend",
+    "is_qwen3_asr_deploy_backend",
     "is_dedicated_deploy_backend",
 ]

@@ -19,6 +19,7 @@ from chameleon.architectures.registry import (
 # Import-time registration of built-in architectures.
 from chameleon.architectures import pi05  # noqa: F401,E402
 from chameleon.architectures import cosmos3  # noqa: F401,E402
+from chameleon.architectures import qwen3_asr  # noqa: F401,E402
 
 __all__ = [
     "ArchitectureSpec",

@@ -26,6 +26,7 @@ from chameleon.api import (
     run_export,
     run_infer,
     run_quantize,
+    run_stream,
     run_trt_profile,
 )
 from chameleon.config.schema import TaskConfig
@@ -100,11 +101,31 @@ class QuantizeAction(WorkflowAction):
     name = "quantize"
 
     def plan(self, ctx: WorkflowContext) -> list[str]:
+        task = ctx.task
+        backend = (task.deploy.backend or "").strip().lower()
+        if task.architecture.startswith("qwen3_asr") or backend in (
+            "qwen3_asr",
+            "qwen3_asr_edgellm",
+        ):
+            quant = (task.model_overrides or {}).get("quantization") or (
+                task.quantize[0].method if task.quantize else "?"
+            )
+            return [f"  quantize: Edge-LLM qwen3_asr method={quant}"]
         return [
             f"  quantize: stage={s.stage} method={s.method}" for s in ctx.task.quantize
         ]
 
     def run(self, ctx: WorkflowContext) -> None:
+        task = ctx.task
+        backend = (task.deploy.backend or "").strip().lower()
+        if task.architecture.startswith("qwen3_asr") or backend in (
+            "qwen3_asr",
+            "qwen3_asr_edgellm",
+        ):
+            from chameleon.deploy.qwen3_asr_edgellm import run_qwen3_asr_quantize
+
+            run_qwen3_asr_quantize(task, ctx.manifest)
+            return
         run_quantize(ctx.task, ctx.adapter(), ctx.manifest)
 
 
@@ -169,12 +190,29 @@ class InferAction(WorkflowAction):
 
     def plan(self, ctx: WorkflowContext) -> list[str]:
         task = ctx.task
+        if task.architecture.startswith("qwen3_asr"):
+            audio = task.asr.audio or (task.model_overrides or {}).get("audio") or "?"
+            return [f"  infer:    asr audio={audio}"]
         return [
             f"  infer:    batch={task.infer.batch_size} "
             f"stage_runtimes={task.stage_runtimes or 'platform-default'}"
         ]
 
     def run(self, ctx: WorkflowContext) -> None:
+        task = ctx.task
+        if task.architecture.startswith("qwen3_asr"):
+            out = run_infer(task)
+            metadata: dict[str, Any] = {
+                "output_type": "asr",
+                "text": str((out or {}).get("text") or ""),
+                "language": str((out or {}).get("language") or ""),
+            }
+            ctx.manifest.add(
+                Artifact(kind="inference", platform=task.platform, metadata=metadata)
+            )
+            logger.info("ASR infer: lang=%s text=%r", metadata["language"], metadata["text"][:120])
+            return
+
         # 与重构前保持一致：infer 前确保 adapter 已构建（含其构建期副作用）。
         ctx.adapter()
         stage_artifacts, stage_runtimes = ctx.infer_engine_bindings()
@@ -184,7 +222,7 @@ class InferAction(WorkflowAction):
             stage_runtimes=stage_runtimes,
         )
         used = sorted(stage_artifacts) if stage_artifacts else []
-        metadata: dict[str, Any] = {"engines_used": used}
+        metadata = {"engines_used": used}
         try:
             tensor_out = torch.as_tensor(actions_out)
             metadata["action_shape"] = list(tensor_out.shape)
@@ -203,11 +241,46 @@ class InferAction(WorkflowAction):
             logger.info("Inference consumed compiled engines for stages: %s", used)
 
 
+class StreamAction(WorkflowAction):
+    name = "stream"
+
+    def plan(self, ctx: WorkflowContext) -> list[str]:
+        s = ctx.task.stream
+        audio = ctx.task.asr.audio or "?"
+        return [
+            f"  stream:   source={s.source} chunk={s.chunk_size_sec}s "
+            f"unfixed_chunk={s.unfixed_chunk_num} unfixed_token={s.unfixed_token_num} "
+            f"audio={audio}"
+        ]
+
+    def run(self, ctx: WorkflowContext) -> None:
+        final = run_stream(ctx.task)
+        ctx.manifest.add(
+            Artifact(
+                kind="inference",
+                platform=ctx.task.platform,
+                metadata={
+                    "output_type": "asr_stream",
+                    "text": str(final.get("text") or ""),
+                    "language": str(final.get("language") or ""),
+                    "chunk_id": int(final.get("chunk_id") or 0),
+                },
+            )
+        )
+        logger.info(
+            "ASR stream done: chunks=%s lang=%s text=%r",
+            final.get("chunk_id"),
+            final.get("language"),
+            str(final.get("text") or "")[:120],
+        )
+
+
 for _action in (
     QuantizeAction(),
     ExportAction(),
     CompileAction(),
     TrtProfileAction(),
     InferAction(),
+    StreamAction(),
 ):
     register_action(_action)

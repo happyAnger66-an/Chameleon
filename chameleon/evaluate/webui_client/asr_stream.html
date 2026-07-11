@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chameleon ASR Stream</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --fg: #e7ecf1;
+      --muted: #8b9aab;
+      --fixed: #d8dee9;
+      --pending: #88c0d0;
+      --accent: #5e81ac;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #1b2735, var(--bg));
+      color: var(--fg);
+      padding: 2rem;
+    }
+    h1 { font-weight: 600; letter-spacing: 0.02em; margin: 0 0 0.5rem; }
+    .meta { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
+    .panel {
+      max-width: 900px;
+      border-top: 1px solid #2a3542;
+      padding-top: 1.25rem;
+    }
+    .label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.35rem; }
+    .transcript {
+      font-size: 1.35rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .fixed { color: var(--fixed); }
+    .pending { color: var(--pending); background: rgba(136, 192, 208, 0.12); border-radius: 2px; }
+    #status { color: var(--accent); margin-top: 1.5rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>ASR Stream</h1>
+  <div class="meta">确定区（灰）/ 待定区（青）— 连接 <code id="wsurl"></code></div>
+  <div class="panel">
+    <div class="label">Language</div>
+    <div id="lang">—</div>
+    <div class="label" style="margin-top:1rem">Transcript</div>
+    <div class="transcript"><span class="fixed" id="fixed"></span><span class="pending" id="pending"></span></div>
+    <div id="status">connecting…</div>
+  </div>
+  <script>
+    function resolveWs() {
+      const q = new URLSearchParams(location.search).get("ws");
+      if (q) return q;
+      try {
+        const hint = localStorage.getItem("chameleon_asr_ws");
+        if (hint) return hint;
+      } catch (_) {}
+      return `ws://${location.hostname || "127.0.0.1"}:8768/ws`;
+    }
+    const wsUrl = resolveWs();
+    document.getElementById("wsurl").textContent = wsUrl;
+    const fixedEl = document.getElementById("fixed");
+    const pendingEl = document.getElementById("pending");
+    const langEl = document.getElementById("lang");
+    const statusEl = document.getElementById("status");
+
+    function connect() {
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => { statusEl.textContent = "connected"; };
+      ws.onclose = () => {
+        statusEl.textContent = "disconnected — retrying…";
+        setTimeout(connect, 1500);
+      };
+      ws.onerror = () => { statusEl.textContent = "error"; };
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.language !== undefined) langEl.textContent = msg.language || "—";
+        fixedEl.textContent = msg.fixed_text || "";
+        pendingEl.textContent = msg.pending_text || "";
+        if (msg.event === "final") statusEl.textContent = "final";
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>

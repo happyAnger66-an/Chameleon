@@ -1,0 +1,37 @@
+# Qwen3-ASR — 可选 Edge-LLM 量化（再 export/compile）。
+#
+# 0.6B 禁止：NVFP4 LLM + FP8 audio（空输出）
+# 推荐 0.6B：NVFP4 LLM + FP16 audio，或 FP8 LLM + FP8 audio
+
+architecture: qwen3_asr
+model: qwen3_asr_0.6b
+platform: nvidia_ada
+output_dir: output/qwen3_asr_0.6b_quant
+
+actions:
+  - quantize
+  - export
+  - compile
+
+model_overrides:
+  checkpoint: ~/models/Qwen3-ASR-0.6B
+  quantization: nvfp4
+  # audio_quantization: fp8   # 勿与 0.6B + nvfp4 组合
+  dtype: fp16
+
+deploy:
+  backend: qwen3_asr
+  export_dir: output/qwen3_asr_0.6b_quant/onnx
+  engine_dir: output/qwen3_asr_0.6b_quant/engines
+
+quantize:
+  - stage: llm
+    method: nvfp4
+
+export:
+  - stage: audio_encoder
+  - stage: llm
+
+compile:
+  - stage: audio_encoder
+  - stage: llm

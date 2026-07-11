@@ -21,6 +21,7 @@ USAGE = (
     + "|   chameleon architectures      List architectures and stages     |\n"
     + "|   chameleon info               List registered backends          |\n"
     + "|   chameleon infer   --config <yaml>                            |\n"
+    + "|   chameleon stream  --config <yaml>                            |\n"
     + "|   chameleon eval    --config <yaml>                            |\n"
     + "|   chameleon export  --config <yaml>                            |\n"
     + "|   chameleon quantize --config <yaml>                           |\n"
@@ -46,6 +47,7 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
     from chameleon.commands.profile import profile_cli
     from chameleon.commands.quantize import quantize_cli
     from chameleon.commands.stats import stats_cli
+    from chameleon.commands.stream import stream_cli
     from chameleon.commands.trt_profile import trt_profile_cli
     from chameleon.commands.webui import webui_cli
     from chameleon.commands.workflow import workflow_cli
@@ -55,6 +57,7 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
         "architectures": architectures_cli,
         "info": info_cli,
         "infer": infer_cli,
+        "stream": stream_cli,
         "eval": eval_cli,
         "export": export_cli,
         "quantize": quantize_cli,
