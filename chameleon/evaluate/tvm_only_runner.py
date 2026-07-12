@@ -42,8 +42,10 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
         self._num_steps = int(task.infer.num_steps or task.model_overrides.get("num_denoise_steps") or 10)
         self._tvm_dtype = str(task.model_overrides.get("tvm_dtype") or "bfloat16")
         # 图内整段 Euler 环（denoise_loop_kv）+ 整段 CUDA Graph（消除每步 host↔device / IPC 往返）
+        # 默认双开：cuBLAS 化后大 GEMM 收敛为少量长 kernel，CUDA Graph 由负转正（见 mlc-vla
+        # docs/optimize/tvm_vs_trt.md §1.0.2 / §4.2[D0]）。逐步测量场景显式 tvm_loop/tvm_cuda_graph=false。
         self._use_loop = bool(task.model_overrides.get("tvm_loop", True))
-        self._cuda_graph = bool(task.model_overrides.get("tvm_cuda_graph", False))
+        self._cuda_graph = bool(task.model_overrides.get("tvm_cuda_graph", True))
         self._param_bytes = 0
 
     @classmethod

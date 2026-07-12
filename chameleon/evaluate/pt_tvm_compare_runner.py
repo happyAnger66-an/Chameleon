@@ -71,7 +71,7 @@ class Pi05PtTvmCompareRunner(PolicyRunner, SupportsDualInfer, SupportsFixedNoise
         )
         self._tvm_dtype = str(task.model_overrides.get("tvm_dtype") or "float16")
         self._use_loop = bool(task.model_overrides.get("tvm_loop", True))
-        self._cuda_graph = bool(task.model_overrides.get("tvm_cuda_graph", False))
+        self._cuda_graph = bool(task.model_overrides.get("tvm_cuda_graph", True))
         self._pt_device = _resolve_pt_device(task)
         self._infer_device = resolve_eval_device(task) or "cuda"
         self._built = False

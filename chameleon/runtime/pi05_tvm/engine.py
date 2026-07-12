@@ -24,12 +24,26 @@ _DEFAULT_MLC_VLA = "/home/zhangxa/codes/edgeLLM/mlc-vla"
 
 
 def _worker_env() -> dict[str, str]:
-    tvm_home = os.environ.get("TVM_HOME", _DEFAULT_TVM_HOME)
-    mlc_vla = os.environ.get("MLC_VLA_HOME", _DEFAULT_MLC_VLA)
+    """Build env for the 3.12 TVM worker.
+
+    Newer TVM imports ``tvm_ffi`` as a top-level package (sibling of ``tvm`` under
+    ``$TVM_HOME/python``, or from ``$TVM_HOME/3rdparty/tvm-ffi/python``). Thor setups
+    that only put ``tvm`` on PYTHONPATH will hit ``ModuleNotFoundError: tvm_ffi``.
+    """
+    tvm_home = Path(os.environ.get("TVM_HOME", _DEFAULT_TVM_HOME)).expanduser()
+    mlc_vla = Path(os.environ.get("MLC_VLA_HOME", _DEFAULT_MLC_VLA)).expanduser()
     env = dict(os.environ)
-    py_paths = [f"{tvm_home}/python", f"{mlc_vla}/python"]
-    env["PYTHONPATH"] = os.pathsep.join(py_paths + [env.get("PYTHONPATH", "")]).strip(os.pathsep)
-    env.setdefault("TVM_LIBRARY_PATH", f"{tvm_home}/build/lib")
+    py_paths: list[str] = [
+        str(tvm_home / "python"),
+        str(tvm_home / "3rdparty" / "tvm-ffi" / "python"),
+        str(mlc_vla / "python"),
+    ]
+    # Keep any pre-existing PYTHONPATH entries (e.g. site-packages with apache-tvm-ffi).
+    existing = env.get("PYTHONPATH", "")
+    if existing:
+        py_paths.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(p for p in py_paths if p)
+    env.setdefault("TVM_LIBRARY_PATH", str(tvm_home / "build" / "lib"))
     env.setdefault("TVM_CUDA_COMPILE_MODE", "nvcc")
     return env
 

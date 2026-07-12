@@ -1,0 +1,63 @@
+# pi05 LIBERO — 仅对已构建 llm / denoise engine 做 trtexec layer profile。
+#
+# 前置：output/pi05_libero_trt/engines/{llm,denoise}.engine 已存在
+# （由 pi05_libero_trt_deploy.yaml 的 export+compile 产出）。
+#
+# 用法：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli trt-profile \
+#       --config configs/pi05/pi05_libero_trt_profile.yaml -v
+#
+# 读法：denoise 单次 enqueue ≈ 1 个 Euler 步；与 bench.denoise_total 对比时 × num_steps(10)。
+# denoise 已含 expert 子图，勿与 expert.engine 延迟相加。
+#
+# 深层 profiling 手册：docs/optimizer/pi05/trt_tvm_profile.md
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_libero_trt
+
+actions:
+  - trt_profile
+
+trt_profile:
+  - stage: llm
+  - stage: denoise
+
+profile:
+  profile_dir: output/pi05_libero_trt/profiles
+  iterations: 50
+  warmup: 200
+  separate_profile_run: true
+  viewer: both
+  webui_port: 8770
+  # compile 与 trtexec 须同 TensorRT 大版本：
+  # trtexec_path: /path/to/TensorRT-11.x/bin/trtexec
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_trt/onnx
+  engine_dir: output/pi05_libero_trt/engines
+
+compile:
+  - stage: llm
+    options:
+      build_cfg: configs/build_configs/llm_build_cfg.py
+  - stage: denoise
+    options:
+      build_cfg: configs/build_configs/denoise_step_build_cfg.py
+
+infer:
+  num_steps: 10
+  torch_device: cuda

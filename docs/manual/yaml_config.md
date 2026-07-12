@@ -496,12 +496,19 @@ JSON：`bench.output`，含 `meta`、`backends.*.{mean,p50,p90}`、`delta`。
 | PT vs TRT/TVM 双路 | `*_compare.yaml` | `eval` |
 | TRT vs TVM 延迟拆分 | `pi05_libero_bench.yaml` | `bench` |
 | 逐步 denoise 延迟拆分 | `pi05_libero_bench_steps.yaml` | `bench` |
+| TRT llm/denoise layer 基线 | `pi05_libero_trt_profile.yaml` | `trt-profile` |
 
 推荐流水线：
 
 ```text
-deploy → eval(trt_only / tvm_only) → bench（定位差距）→ trt-profile / 优化
+deploy → eval(trt_only / tvm_only) → bench（定位差距）
+  → mlc_vla.bench_kv / nsys（TVM kernel）+ trt-profile（TRT layer）
+  → 优化
 ```
+
+深层 profiling 命令（`bench_kv` / `nsys` / `trt-profile`）见
+[`docs/optimizer/pi05/trt_tvm_profile.md`](../optimizer/pi05/trt_tvm_profile.md)；
+一键脚本：`bash scripts/profile_pi05_trt_tvm.sh`（加 `--run` 才真正执行）。
 
 ---
 
