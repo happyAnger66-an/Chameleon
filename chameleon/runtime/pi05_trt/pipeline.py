@@ -90,6 +90,8 @@ def _embed_prefix_trt(
     img_masks: list[torch.Tensor],
     lang_tokens: torch.Tensor,
     lang_masks: torch.Tensor,
+    *,
+    timer: Any | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """SigLIP 走 TRT vit.engine；语言 embedding 仍用 PyTorch embed_tokens。"""
     embs: list[torch.Tensor] = []
@@ -97,7 +99,11 @@ def _embed_prefix_trt(
     att_masks: list[int] = []
 
     for img, img_mask in zip(images, img_masks, strict=True):
-        img_emb = vit_engine.run({"pixel_values": img})["output"]
+        if timer is not None:
+            with timer.region("vit", device=True):
+                img_emb = vit_engine.run({"pixel_values": img})["output"]
+        else:
+            img_emb = vit_engine.run({"pixel_values": img})["output"]
         img_emb = _restore_vit_scale_for_openpi(img_emb, model)
         bsize, num_img_embs = img_emb.shape[:2]
         embs.append(img_emb)
@@ -105,9 +111,15 @@ def _embed_prefix_trt(
         att_masks.extend([0] * num_img_embs)
 
     pwe = model.paligemma_with_expert
-    lang_emb = pwe.embed_language_tokens(lang_tokens)
-    lang_emb_dim = lang_emb.shape[-1]
-    lang_emb = lang_emb * math.sqrt(lang_emb_dim)
+    if timer is not None:
+        with timer.region("lang_embed", device=True):
+            lang_emb = pwe.embed_language_tokens(lang_tokens)
+            lang_emb_dim = lang_emb.shape[-1]
+            lang_emb = lang_emb * math.sqrt(lang_emb_dim)
+    else:
+        lang_emb = pwe.embed_language_tokens(lang_tokens)
+        lang_emb_dim = lang_emb.shape[-1]
+        lang_emb = lang_emb * math.sqrt(lang_emb_dim)
 
     embs.append(lang_emb)
     pad_masks.append(lang_masks)
@@ -134,10 +146,28 @@ class Pi05TrtPipeline:
         self._engines = engines
         self._num_steps = num_steps
         self._static_prefix_len = int(static_prefix_len)
+        self._timer: Any | None = None
 
     @property
     def num_steps(self) -> int:
         return self._num_steps
+
+    def set_timer(self, timer: Any | None) -> None:
+        """Attach / clear a ``StageTimer`` for the next ``infer`` calls."""
+        self._timer = timer
+
+    def close(self) -> None:
+        """Release all TRT stage engines (vit/llm/denoise)."""
+        engines = getattr(self, "_engines", None) or {}
+        for name, eng in list(engines.items()):
+            close = getattr(eng, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    logger.debug("engine %s close failed", name, exc_info=True)
+        self._engines = {}
+        self._timer = None
 
     def infer(
         self,
@@ -149,6 +179,7 @@ class Pi05TrtPipeline:
         num_steps: int | None = None,
     ) -> torch.Tensor:
         """Run TRT vit → llm → denoise loop and return action chunk ``[B, H, D]``."""
+        timer = self._timer
         dev = torch.device(device) if not isinstance(device, torch.device) else device
         steps = int(num_steps if num_steps is not None else self._num_steps)
         bsize = observation.state.shape[0]
@@ -158,9 +189,15 @@ class Pi05TrtPipeline:
                 dev,
             )
 
-        images, img_masks, lang_tokens, lang_masks, _state = model._preprocess_observation(  # noqa: SLF001
-            observation, train=False
-        )
+        if timer is not None:
+            with timer.region("preprocess", device=False):
+                images, img_masks, lang_tokens, lang_masks, _state = model._preprocess_observation(  # noqa: SLF001
+                    observation, train=False
+                )
+        else:
+            images, img_masks, lang_tokens, lang_masks, _state = model._preprocess_observation(  # noqa: SLF001
+                observation, train=False
+            )
 
         prefix_embs, prefix_pad_masks, prefix_att_masks = _embed_prefix_trt(
             model,
@@ -169,26 +206,42 @@ class Pi05TrtPipeline:
             img_masks,
             lang_tokens,
             lang_masks,
+            timer=timer,
         )
-        prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
-            prefix_embs,
-            prefix_pad_masks,
-            prefix_att_masks,
-            self._static_prefix_len,
-        )
+        if timer is not None:
+            with timer.region("prefix_prep", device=False):
+                prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
+                    prefix_embs,
+                    prefix_pad_masks,
+                    prefix_att_masks,
+                    self._static_prefix_len,
+                )
+                prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+                prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+                prefix_att_4d = model._prepare_attention_masks_4d(prefix_att_2d)  # noqa: SLF001
+                prefix_att_4d = _sanitize_attention_mask_for_trt(prefix_att_4d)
+        else:
+            prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
+                prefix_embs,
+                prefix_pad_masks,
+                prefix_att_masks,
+                self._static_prefix_len,
+            )
+            prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+            prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+            prefix_att_4d = model._prepare_attention_masks_4d(prefix_att_2d)  # noqa: SLF001
+            prefix_att_4d = _sanitize_attention_mask_for_trt(prefix_att_4d)
 
-        prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-        prefix_att_4d = model._prepare_attention_masks_4d(prefix_att_2d)  # noqa: SLF001
-        prefix_att_4d = _sanitize_attention_mask_for_trt(prefix_att_4d)
-
-        llm_out = self._engines["llm"].run(
-            {
-                "inputs_embeds": prefix_embs,
-                "attention_mask": prefix_att_4d,
-                "position_ids": prefix_position_ids,
-            }
-        )
+        llm_inputs = {
+            "inputs_embeds": prefix_embs,
+            "attention_mask": prefix_att_4d,
+            "position_ids": prefix_position_ids,
+        }
+        if timer is not None:
+            with timer.region("llm_prefill", device=True):
+                llm_out = self._engines["llm"].run(llm_inputs)
+        else:
+            llm_out = self._engines["llm"].run(llm_inputs)
         past_keys = llm_out.get("past_keys", llm_out["output"])
         past_values = llm_out["past_values"]
         _check_finite("llm.past_keys", past_keys)
@@ -199,21 +252,39 @@ class Pi05TrtPipeline:
         time = torch.tensor(1.0, dtype=torch.float32, device=dev)
         denoise = self._engines["denoise"]
 
-        while time >= -dt / 2:
-            expanded_time = time.expand(bsize)
-            step_out = denoise.run(
-                {
-                    "prefix_pad_masks": prefix_pad_masks,
-                    "past_keys": past_keys,
-                    "past_values": past_values,
-                    "x_t": x_t,
-                    "timestep": expanded_time,
-                }
-            )
-            v_t = step_out.get("v_t", step_out["output"])
-            _check_finite("denoise.v_t", v_t)
-            x_t = x_t + dt * v_t
-            time = time + dt
+        if timer is not None:
+            with timer.region("denoise_total", device=True):
+                while time >= -dt / 2:
+                    expanded_time = time.expand(bsize)
+                    step_out = denoise.run(
+                        {
+                            "prefix_pad_masks": prefix_pad_masks,
+                            "past_keys": past_keys,
+                            "past_values": past_values,
+                            "x_t": x_t,
+                            "timestep": expanded_time,
+                        }
+                    )
+                    v_t = step_out.get("v_t", step_out["output"])
+                    _check_finite("denoise.v_t", v_t)
+                    x_t = x_t + dt * v_t
+                    time = time + dt
+        else:
+            while time >= -dt / 2:
+                expanded_time = time.expand(bsize)
+                step_out = denoise.run(
+                    {
+                        "prefix_pad_masks": prefix_pad_masks,
+                        "past_keys": past_keys,
+                        "past_values": past_values,
+                        "x_t": x_t,
+                        "timestep": expanded_time,
+                    }
+                )
+                v_t = step_out.get("v_t", step_out["output"])
+                _check_finite("denoise.v_t", v_t)
+                x_t = x_t + dt * v_t
+                time = time + dt
 
         _check_finite("actions", x_t)
         return x_t

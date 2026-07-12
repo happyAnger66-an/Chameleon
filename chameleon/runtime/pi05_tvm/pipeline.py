@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import numpy as np
@@ -41,6 +42,7 @@ class Pi05TvmPipeline:
         self._num_steps = num_steps
         self._use_loop = bool(use_loop)
         self._static_prefix_len = int(static_prefix_len)
+        self._timer: Any | None = None
         cfg_pl = int(tvm_client.info["prefix_len"])
         if cfg_pl != self._static_prefix_len:
             logger.warning(
@@ -53,6 +55,10 @@ class Pi05TvmPipeline:
     def num_steps(self) -> int:
         return self._num_steps
 
+    def set_timer(self, timer: Any | None) -> None:
+        """Attach / clear a ``StageTimer`` for the next ``infer`` calls."""
+        self._timer = timer
+
     def infer(
         self,
         model: Any,
@@ -62,6 +68,7 @@ class Pi05TvmPipeline:
         noise: torch.Tensor | None = None,
         num_steps: int | None = None,
     ) -> torch.Tensor:
+        timer = self._timer
         dev = torch.device(device) if not isinstance(device, torch.device) else device
         steps = int(num_steps if num_steps is not None else self._num_steps)
         bsize = observation.state.shape[0]
@@ -72,21 +79,63 @@ class Pi05TvmPipeline:
                 (bsize, model.config.action_horizon, model.config.action_dim), dev
             )
 
-        images, img_masks, lang_tokens, lang_masks, _state = model._preprocess_observation(  # noqa: SLF001
-            observation, train=False
-        )
+        if timer is not None:
+            with timer.region("preprocess", device=False):
+                images, img_masks, lang_tokens, lang_masks, _state = model._preprocess_observation(  # noqa: SLF001
+                    observation, train=False
+                )
+        else:
+            images, img_masks, lang_tokens, lang_masks, _state = model._preprocess_observation(  # noqa: SLF001
+                observation, train=False
+            )
+
         prefix_embs, prefix_pad_masks, prefix_att_masks = _embed_prefix_trt(
-            model, self._vit, images, img_masks, lang_tokens, lang_masks,
+            model, self._vit, images, img_masks, lang_tokens, lang_masks, timer=timer,
         )
-        prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
-            prefix_embs, prefix_pad_masks, prefix_att_masks, self._static_prefix_len,
-        )
+        if timer is not None:
+            with timer.region("prefix_prep", device=False):
+                prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
+                    prefix_embs, prefix_pad_masks, prefix_att_masks, self._static_prefix_len,
+                )
+                prefix_np = prefix_embs.detach().to(torch.float32).cpu().numpy()
+                pad_np = prefix_pad_masks.detach().cpu().numpy().reshape(-1).astype("float32")
+                noise_np = noise.detach().to(torch.float32).cpu().numpy()
+        else:
+            prefix_embs, prefix_pad_masks, prefix_att_masks = _pad_prefix_to_static_len(
+                prefix_embs, prefix_pad_masks, prefix_att_masks, self._static_prefix_len,
+            )
+            prefix_np = prefix_embs.detach().to(torch.float32).cpu().numpy()
+            pad_np = prefix_pad_masks.detach().cpu().numpy().reshape(-1).astype("float32")
+            noise_np = noise.detach().to(torch.float32).cpu().numpy()
 
-        prefix_np = prefix_embs.detach().to(torch.float32).cpu().numpy()  # [1,P,W]
-        pad_np = prefix_pad_masks.detach().cpu().numpy().reshape(-1).astype("float32")  # [P]
-        noise_np = noise.detach().to(torch.float32).cpu().numpy()  # [1,H,D]
+        if timer is not None:
+            t_ipc0 = time.perf_counter()
+            actions, worker_timings = self._tvm.sample(
+                prefix_np, pad_np, noise_np, steps, loop=self._use_loop, return_timings=True,
+            )
+            ipc_total_ms = (time.perf_counter() - t_ipc0) * 1e3
+            wt = dict(worker_timings or {})
+            worker_ms = float(wt.get("tvm_worker_ms") or 0.0)
+            prefill_ms = float(wt.get("tvm_prefill_ms") or 0.0)
+            denoise_ms = float(wt.get("tvm_denoise_ms") or 0.0)
+            step_mean = float(wt.get("tvm_denoise_step_mean_ms") or 0.0)
 
-        actions = self._tvm.sample(prefix_np, pad_np, noise_np, steps, loop=self._use_loop)  # [1,H,D] fp32
+            if prefill_ms > 0:
+                # Align with TRT stage names for side-by-side delta.
+                timer.add("llm_prefill", prefill_ms)
+            if denoise_ms > 0:
+                timer.add("denoise_total", denoise_ms)
+            if step_mean > 0:
+                timer.add("denoise_step_mean", step_mean)
+            if worker_ms > 0:
+                timer.add("tvm_worker", worker_ms)
+                timer.add("ipc", max(0.0, ipc_total_ms - worker_ms))
+            else:
+                timer.add("tvm_worker", ipc_total_ms)
+                timer.add("ipc", 0.0)
+        else:
+            actions = self._tvm.sample(prefix_np, pad_np, noise_np, steps, loop=self._use_loop)
+
         return torch.from_numpy(np.asarray(actions)).to(dev)
 
 
@@ -100,3 +149,4 @@ def attach_tvm_to_policy(policy: Any, pipeline: Pi05TvmPipeline) -> None:
         return pipeline.infer(model, device, observation, noise=noise, num_steps=ns)
 
     policy._sample_actions = _sample_actions_tvm
+    policy._chameleon_pipeline = pipeline

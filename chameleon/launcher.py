@@ -23,6 +23,7 @@ USAGE = (
     + "|   chameleon infer   --config <yaml>                            |\n"
     + "|   chameleon stream  --config <yaml>                            |\n"
     + "|   chameleon eval    --config <yaml>                            |\n"
+    + "|   chameleon bench   --config <yaml>                            |\n"
     + "|   chameleon export  --config <yaml>                            |\n"
     + "|   chameleon quantize --config <yaml>                           |\n"
     + "|   chameleon compile  --config <yaml>                           |\n"
@@ -38,6 +39,7 @@ USAGE = (
 
 
 def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
+    from chameleon.commands.bench import bench_cli
     from chameleon.commands.compile import compile_cli
     from chameleon.commands.draw import draw_cli
     from chameleon.commands.eval import eval_cli
@@ -59,6 +61,7 @@ def _dispatch_table() -> dict[str, Callable[[list[str] | None], int]]:
         "infer": infer_cli,
         "stream": stream_cli,
         "eval": eval_cli,
+        "bench": bench_cli,
         "export": export_cli,
         "quantize": quantize_cli,
         "compile": compile_cli,

@@ -354,6 +354,43 @@ class StreamConfig(BaseModel):
     """是否尝试启用 Edge-LLM StreamChannel（pybind 可用时）。"""
 
 
+class BenchConfig(BaseModel):
+    """Stage-level latency bench（``chameleon bench`` / ``actions`` 含 ``bench``）。"""
+
+    backends: list[str] = Field(default_factory=lambda: ["trt", "tvm"])
+    """``trt`` | ``tvm``（串行跑，避免双后端同时占显存）。"""
+
+    warmup: int = 3
+    runs: int = 20
+    sync: str = "cuda_event"
+    """``cuda_event`` | ``host``。"""
+
+    stages: list[str] = Field(
+        default_factory=lambda: [
+            "preprocess",
+            "vit",
+            "lang_embed",
+            "prefix_prep",
+            "llm_prefill",
+            "denoise_total",
+            "denoise_step_mean",
+            "tvm_worker",
+            "ipc",
+            "e2e",
+        ]
+    )
+    """对比表优先展示的 stage 顺序（缺失则跳过）。"""
+
+    tvm_loop: bool | None = None
+    """覆盖 ``model_overrides.tvm_loop``；``false`` 时逐步 denoise 便于与 TRT 逐步对比。"""
+
+    sample_index: int = 0
+    """从 dataset 取哪一帧做固定 observation。"""
+
+    output: str | None = None
+    """JSON 报告路径；缺省 ``{output_dir}/bench.json``。"""
+
+
 class TaskConfig(BaseModel):
     architecture: str = "pi05"
     model: str = "pi05"
@@ -361,7 +398,7 @@ class TaskConfig(BaseModel):
     output_dir: str = "output/chameleon_run"
 
     actions: list[str] = Field(default_factory=lambda: ["infer"])
-    """Ordered subset of ``quantize | export | compile | trt_profile | infer | stream``."""
+    """Ordered subset of ``quantize | export | compile | trt_profile | infer | stream | bench``."""
 
     model_overrides: dict[str, Any] = Field(default_factory=dict)
     """Overrides applied to the model adapter config (e.g. action_dim)."""
@@ -390,6 +427,8 @@ class TaskConfig(BaseModel):
     """ASR 参数（qwen3_asr）。"""
     stream: StreamConfig = Field(default_factory=StreamConfig)
     """流式 demo 参数。"""
+    bench: BenchConfig = Field(default_factory=BenchConfig)
+    """Stage latency bench 参数。"""
 
     @classmethod
     def load(cls, path: str | Path) -> "TaskConfig":

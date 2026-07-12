@@ -35,5 +35,6 @@ def attach_trt_to_policy(
         )
 
     policy._sample_actions = _sample_actions_trt
+    policy._chameleon_pipeline = pipeline
     if release_weights:
         release_heavy_pytorch_weights(model)

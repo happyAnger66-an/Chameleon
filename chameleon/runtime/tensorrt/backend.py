@@ -95,6 +95,10 @@ class TensorRegistry:
             self._buffers[key] = buf
         return buf
 
+    def clear(self) -> None:
+        """Drop cached device buffers so GPU memory can be reclaimed."""
+        self._buffers.clear()
+
 
 class TensorRTEngine(Engine):
     """A loaded TRT engine exposing the unified ``run(inputs) -> outputs`` API."""
@@ -145,6 +149,24 @@ class TensorRTEngine(Engine):
         self._graph: torch.cuda.CUDAGraph | None = None
         self._graph_inputs: list[torch.Tensor] = []
         self._graph_outputs: dict[str, torch.Tensor] = {}
+        self._closed = False
+
+    def close(self) -> None:
+        """Release execution context, I/O buffers, and engine (frees GPU activation mem)."""
+        if self._closed:
+            return
+        self._closed = True
+        self._graph = None
+        self._graph_inputs = []
+        self._graph_outputs = {}
+        try:
+            self._registry.clear()
+        except Exception:  # noqa: BLE001
+            pass
+        # Drop context before engine — TRT holds activation memory on the context.
+        self._context = None
+        self._engine = None
+        self._registry = None  # type: ignore[assignment]
 
     def _bind_inputs(self, inputs: dict[str, Any]) -> list[torch.Tensor]:
         # Positional binding: dict value order matches the stage signature.

@@ -32,6 +32,7 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
         self._session: OpenPiSession | None = None
         self._tvm_client = None
         self._built = False
+        self._pipeline = None
         self._device = resolve_eval_device(task) or "cuda"
         self._pytorch_load_device = resolve_pytorch_load_device(task)
         self._engine_dir = resolve_engine_dir(task)
@@ -75,6 +76,7 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
             use_loop=self._use_loop,
         )
         attach_tvm_to_policy(self._session.policy, pipeline)
+        self._pipeline = pipeline
         logger.info(
             "Pi05TvmOnlyRunner built: checkpoint=%s dtype=%s num_steps=%d "
             "loop=%s cuda_graph=%s denoise_param=%.1fMB",
@@ -87,6 +89,46 @@ class Pi05TvmOnlyRunner(PolicyRunner, SupportsFixedNoise):
         )
         self._built = True
         return self
+
+    def set_timer(self, timer: Any | None) -> None:
+        if self._pipeline is not None:
+            self._pipeline.set_timer(timer)
+
+    def close(self) -> None:
+        """Tear down TVM worker + vit TRT engine + openpi session."""
+        if self._session is not None:
+            policy = self._session.policy
+            if hasattr(policy, "_sample_actions"):
+                policy._sample_actions = None
+            if hasattr(policy, "_chameleon_pipeline"):
+                policy._chameleon_pipeline = None
+        if self._pipeline is not None:
+            vit = getattr(self._pipeline, "_vit", None)
+            close = getattr(vit, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    logger.debug("vit.close failed", exc_info=True)
+            self._pipeline._tvm = None  # type: ignore[attr-defined]
+            self._pipeline = None
+        if self._tvm_client is not None:
+            try:
+                self._tvm_client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._tvm_client = None
+        if self._session is not None:
+            try:
+                policy = self._session.policy
+                model = getattr(policy, "_model", None)
+                if model is not None and hasattr(model, "cpu"):
+                    model.cpu()
+            except Exception:  # noqa: BLE001
+                logger.debug("session model.cpu failed", exc_info=True)
+            self._session = None
+        self._built = False
+        logger.info("Pi05TvmOnlyRunner closed")
 
     def noise_for_sample(self, sample_index: int) -> np.ndarray | None:
         return flow_match_noise(

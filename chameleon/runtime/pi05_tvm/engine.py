@@ -60,6 +60,7 @@ class TvmWorkerClient:
             raise RuntimeError(f"TVM worker 启动失败:\n{err}")
         self.info = info
         self.param_bytes = int(info.get("param_bytes", 0))
+        self.last_timings: dict[str, Any] = {}
         logger.info("TVM worker ready: prefix_len=%d denoise_param=%.1fMB",
                     info["prefix_len"], self.param_bytes / 1e6)
 
@@ -79,7 +80,8 @@ class TvmWorkerClient:
         return pickle.loads(self.proc.stdout.read(n))
 
     def sample(self, prefix_embs: np.ndarray, prefix_pad: np.ndarray,
-               noise: np.ndarray, num_steps: int, loop: bool = True) -> np.ndarray:
+               noise: np.ndarray, num_steps: int, loop: bool = True,
+               *, return_timings: bool = False):
         self._send({
             "op": "sample",
             "prefix_embs": np.ascontiguousarray(prefix_embs, dtype=np.float32),
@@ -87,11 +89,17 @@ class TvmWorkerClient:
             "noise": np.ascontiguousarray(noise, dtype=np.float32),
             "num_steps": int(num_steps),
             "loop": bool(loop),
+            "timed": bool(return_timings),
         })
         r = self._recv()
         if not r.get("ok"):
             raise RuntimeError(f"TVM worker sample 失败:\n{r.get('error')}")
-        return r["actions"]
+        actions = r["actions"]
+        timings = dict(r.get("timings") or {})
+        self.last_timings = timings
+        if return_timings:
+            return actions, timings
+        return actions
 
     def close(self) -> None:
         try:

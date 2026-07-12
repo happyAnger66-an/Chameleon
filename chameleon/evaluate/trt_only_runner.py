@@ -20,6 +20,7 @@ from chameleon.evaluate.trt_eval_utils import (
 from chameleon.runtime.pi05_trt.adapter import attach_trt_to_policy, prepare_openpi_policy_for_trt
 from chameleon.runtime.pi05_trt.engines import load_trt_stage_engines
 from chameleon.runtime.pi05_trt.pipeline import Pi05TrtPipeline
+from chameleon.runtime.tensorrt.backend import memory_report as memory_hint
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class Pi05TrtOnlyRunner(PolicyRunner, SupportsFixedNoise):
         self._task = task
         self._session: OpenPiSession | None = None
         self._built = False
+        self._pipeline: Pi05TrtPipeline | None = None
         self._device = resolve_eval_device(task) or "cuda"
         self._pytorch_load_device = resolve_pytorch_load_device(task)
         self._engine_dir = resolve_engine_dir(task)
@@ -73,8 +75,40 @@ class Pi05TrtOnlyRunner(PolicyRunner, SupportsFixedNoise):
         )
         pipeline = Pi05TrtPipeline(trt_engines, num_steps=self._num_steps)
         attach_trt_to_policy(self._session.policy, pipeline, release_weights=False)
+        self._pipeline = pipeline
         self._built = True
         return self
+
+    def set_timer(self, timer: Any | None) -> None:
+        if self._pipeline is not None:
+            self._pipeline.set_timer(timer)
+
+    def close(self) -> None:
+        """Tear down TRT engines + openpi session so GPU mem can go to TVM."""
+        if self._session is not None:
+            policy = self._session.policy
+            # Break attach_trt_to_policy closure that keeps engines alive.
+            if hasattr(policy, "_sample_actions"):
+                policy._sample_actions = None
+            if hasattr(policy, "_chameleon_pipeline"):
+                policy._chameleon_pipeline = None
+        if self._pipeline is not None:
+            try:
+                self._pipeline.close()
+            except Exception:  # noqa: BLE001
+                logger.debug("pipeline.close failed", exc_info=True)
+            self._pipeline = None
+        if self._session is not None:
+            try:
+                policy = self._session.policy
+                model = getattr(policy, "_model", None)
+                if model is not None and hasattr(model, "cpu"):
+                    model.cpu()
+            except Exception:  # noqa: BLE001
+                logger.debug("session model.cpu failed", exc_info=True)
+            self._session = None
+        self._built = False
+        logger.info("Pi05TrtOnlyRunner closed (%s)", memory_hint())
 
     def noise_for_sample(self, sample_index: int) -> np.ndarray | None:
         return flow_match_noise(

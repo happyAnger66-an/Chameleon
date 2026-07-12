@@ -1,0 +1,68 @@
+# pi05 LIBERO — TRT vs TVM stage latency（逐步 denoise，便于 llm/denoise 对齐）。
+#
+# 与 pi05_libero_bench.yaml 相同，但 tvm_loop=false：
+#   TVM 走宿主逐步 denoise_step_kv，可输出 denoise_step_mean，与 TRT denoise×N 可比。
+#
+# 启动：
+#   PYTHONPATH=. models/openpi/.venv/bin/python -m chameleon.cli bench \
+#       --config configs/pi05/pi05_libero_bench_steps.yaml -v
+
+architecture: pi05
+model: pi05
+platform: nvidia_ada
+output_dir: output/pi05_libero_bench_steps
+
+actions:
+  - bench
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+  tvm_dtype: float16
+  tvm_loop: false
+  tvm_cuda_graph: false
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_trt/onnx
+  engine_dir: output/pi05_libero_trt/engines
+
+infer:
+  num_steps: 10
+  torch_device: cuda
+
+data:
+  dataset: pi05_libero
+  openpi_config: pi05_libero
+  start_index: 0
+  num_samples: 1
+
+evaluate:
+  checkpoint_dir: models/openpi/pytorch
+  norm_stats_dir: ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+  asset_id: physical-intelligence/libero
+  policy_runner: trt_only
+  engine_dir: output/pi05_libero_trt/engines
+  noise: fixed
+  noise_seed: 0
+  precision: bf16
+  trt_cuda_graph: false
+  device: cuda
+  pytorch_load_device: cpu
+  viewer: console
+
+bench:
+  backends: [trt, tvm]
+  warmup: 3
+  runs: 20
+  sync: cuda_event
+  tvm_loop: false
+  sample_index: 0
+  output: output/pi05_libero_bench_steps/bench.json
