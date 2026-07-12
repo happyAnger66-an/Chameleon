@@ -1,0 +1,69 @@
+# pi05 LIBERO @ Jetson Thor — 真实 openpi 权重 → ONNX → TensorRT engine 构建。
+#
+# 与 pi05_libero_trt_deploy.yaml 相同，仅 platform=nvidia_thor（sm_101, Blackwell）+ Thor 专属
+# 输出目录。引擎是设备相关的：Ada/开发机 build 的 engine 不能在 Thor 复用，必须在 Thor 本机重跑本步。
+#
+# 前置：Thor 上装好 openpi 3.11 venv（ONNX 导出）+ TensorRT（engine build），权重放到 checkpoint_dir。
+#
+# 仅导出 ONNX（dry-run，不 build）：
+#   PYTHONPATH=. <openpi_py311> -m chameleon.cli export \
+#       --config configs/pi05/pi05_libero_trt_deploy_thor.yaml --dry-run
+#
+# 导出 + build engine（需 TensorRT + GPU）：
+#   PYTHONPATH=. <openpi_py311> -m chameleon.cli workflow \
+#       --config configs/pi05/pi05_libero_trt_deploy_thor.yaml
+
+architecture: pi05
+model: pi05
+platform: nvidia_thor
+output_dir: output/pi05_libero_thor
+
+actions:
+  - export
+  - compile
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_thor/onnx
+  engine_dir: output/pi05_libero_thor/engines
+  use_cudagraph: false
+
+data:
+  openpi_config: pi05_libero
+
+export:
+  - stage: vit
+  - stage: llm
+  - stage: expert
+  - stage: denoise
+
+compile:
+  - stage: vit
+    options:
+      build_cfg: configs/build_configs/vit_build_cfg.py
+  - stage: llm
+    options:
+      build_cfg: configs/build_configs/llm_build_cfg.py
+  - stage: expert
+    options:
+      build_cfg: configs/build_configs/expert_build_cfg.py
+  - stage: denoise
+    options:
+      build_cfg: configs/build_configs/denoise_step_build_cfg.py
+
+infer:
+  batch_size: 1
+  num_steps: 10
+  use_compiled_engines: false
+  torch_device: cuda

@@ -497,6 +497,20 @@ JSON：`bench.output`，含 `meta`、`backends.*.{mean,p50,p90}`、`delta`。
 | TRT vs TVM 延迟拆分 | `pi05_libero_bench.yaml` | `bench` |
 | 逐步 denoise 延迟拆分 | `pi05_libero_bench_steps.yaml` | `bench` |
 | TRT llm/denoise layer 基线 | `pi05_libero_trt_profile.yaml` | `trt-profile` |
+| **Thor 编 TRT 引擎** | `pi05_libero_trt_deploy_thor.yaml` | `workflow` |
+| **Thor TRT vs TVM 延迟** | `pi05_libero_bench_thor.yaml` | `bench` |
+
+Jetson Thor（sm_101）：引擎设备相关，须在 Thor 本机 build 后再 bench。先
+`source scripts/tvm_thor.sh && export MLC_VLA_PY=<thor python3.12>`，再：
+
+```bash
+bash scripts/profile_pi05_trt_tvm.sh --run thor          # build 引擎 + bench
+# 或分步：--run thor-deploy / --run thor-bench
+```
+
+注意先确认 Thor 的 TVM 带 cuBLAS 扩展（`$MLC_VLA_PY -c "import tvm;
+print(bool(tvm.get_global_func('relax.ext.cublas', True)))"`），否则 mlc-vla 自动回退 dlight，
+TVM 会明显慢于 TRT。
 
 推荐流水线：
 

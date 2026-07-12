@@ -1,0 +1,78 @@
+# pi05 LIBERO @ Jetson Thor — TRT vs TVM(mlc-vla M1) stage latency bench。
+#
+# 与 pi05_libero_bench.yaml 相同，仅 platform=nvidia_thor + Thor 专属 engine_dir。
+# TVM 默认 tvm_loop + tvm_cuda_graph 双开（cuBLAS 化后 Graph 净收益；Thor 若无 cuBLAS 扩展，
+# mlc-vla 会自动回退 dlight，见 mlc-vla/python/mlc_vla/compile.py:resolve_cublas）。
+#
+# 前置：
+#   1. Thor TRT engines 已 build：configs/pi05/pi05_libero_trt_deploy_thor.yaml
+#      （engine_dir 须与本文件一致：output/pi05_libero_thor/engines）
+#   2. Thor 环境：openpi 3.11 venv + Python 3.12(tvm/mlc-vla)
+#      source scripts/tvm_thor.sh 并 export MLC_VLA_PY=<thor_python3.12>
+#
+# 启动（TRT 与 TVM 一次性对比）：
+#   source scripts/tvm_thor.sh
+#   export MLC_VLA_PY=<thor_python3.12>
+#   PYTHONPATH=. <openpi_py311> -m chameleon.cli bench \
+#       --config configs/pi05/pi05_libero_bench_thor.yaml -v
+#
+# 显存紧张时可分开各占一卡：... bench --backends trt / ... bench --backends tvm
+
+architecture: pi05
+model: pi05
+platform: nvidia_thor
+output_dir: output/pi05_libero_thor_bench
+
+actions:
+  - bench
+
+model_overrides:
+  use_reference: false
+  checkpoint: models/openpi/pytorch/model.safetensors
+  action_dim: 32
+  action_horizon: 10
+  paligemma_variant: gemma_2b
+  action_expert_variant: gemma_300m
+  precision: bfloat16
+  tvm_dtype: float16
+  tvm_loop: true
+  tvm_cuda_graph: true
+
+deploy:
+  backend: pi05
+  checkpoint_dir: models/openpi/pytorch
+  train_config: pi05_libero
+  export_dir: output/pi05_libero_thor/onnx
+  engine_dir: output/pi05_libero_thor/engines
+
+infer:
+  num_steps: 10
+  torch_device: cuda
+
+data:
+  dataset: pi05_libero
+  openpi_config: pi05_libero
+  start_index: 0
+  num_samples: 1
+
+evaluate:
+  checkpoint_dir: models/openpi/pytorch
+  norm_stats_dir: ~/.cache/openpi/openpi-assets/checkpoints/pi05_libero/assets
+  asset_id: physical-intelligence/libero
+  policy_runner: trt_only
+  engine_dir: output/pi05_libero_thor/engines
+  noise: fixed
+  noise_seed: 0
+  precision: bf16
+  trt_cuda_graph: false
+  device: cuda
+  pytorch_load_device: cpu
+  viewer: console
+
+bench:
+  backends: [trt, tvm]
+  warmup: 3
+  runs: 20
+  sync: cuda_event
+  sample_index: 0
+  output: output/pi05_libero_thor_bench/bench.json

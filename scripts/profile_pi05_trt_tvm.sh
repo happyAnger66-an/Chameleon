@@ -5,6 +5,11 @@
 #   bash scripts/profile_pi05_trt_tvm.sh              # 只打印
 #   bash scripts/profile_pi05_trt_tvm.sh --run        # 全部执行
 #   bash scripts/profile_pi05_trt_tvm.sh --run kv|trt|nsys|bench
+#
+# Jetson Thor（先 source scripts/tvm_thor.sh && export MLC_VLA_PY=<thor python3.12>）：
+#   bash scripts/profile_pi05_trt_tvm.sh --run thor          # build 引擎 + bench
+#   bash scripts/profile_pi05_trt_tvm.sh --run thor-deploy   # 仅 build 引擎
+#   bash scripts/profile_pi05_trt_tvm.sh --run thor-bench    # 仅 bench（引擎已 build）
 
 set -euo pipefail
 
@@ -67,6 +72,18 @@ run_trt() {
   _cmd "\"$CHAM_PY\" -m chameleon.cli trt-profile --config configs/pi05/pi05_libero_trt_profile.yaml -v | tee \"$OUT/trt/trt_profile.log\""
 }
 
+# Jetson Thor（sm_101）：引擎设备相关，须在 Thor 本机 build 后再 bench。
+# 前置：source scripts/tvm_thor.sh && export MLC_VLA_PY=<thor python3.12>
+run_thor_deploy() {
+  echo "== T1) Thor: build TRT engines (export+compile) =="
+  _cmd "\"$CHAM_PY\" -m chameleon.cli workflow --config configs/pi05/pi05_libero_trt_deploy_thor.yaml"
+}
+
+run_thor_bench() {
+  echo "== T2) Thor: chameleon bench TRT vs TVM (loop+CUDA Graph) =="
+  _cmd "\"$CHAM_PY\" -m chameleon.cli bench --config configs/pi05/pi05_libero_bench_thor.yaml -v | tee \"$OUT/bench_kv/cham_thor.txt\""
+}
+
 run_nsys() {
   if ! command -v nsys >/dev/null 2>&1; then
     echo "nsys not found; skip"
@@ -95,15 +112,22 @@ case "$MODE" in
   bench) run_bench ;;
   trt) run_trt ;;
   nsys) run_nsys ;;
+  thor-deploy) run_thor_deploy ;;
+  thor-bench) run_thor_bench ;;
+  thor)
+    run_thor_deploy
+    echo
+    run_thor_bench
+    ;;
   *)
-    echo "unknown mode: $MODE (all|kv|bench|trt|nsys)" >&2
+    echo "unknown mode: $MODE (all|kv|bench|trt|nsys|thor|thor-deploy|thor-bench)" >&2
     exit 2
     ;;
 esac
 
 echo
 if [[ "$RUN" -eq 0 ]]; then
-  echo "Dry-run only. Re-run with: $0 --run [all|kv|bench|trt|nsys]"
+  echo "Dry-run only. Re-run with: $0 --run [all|kv|bench|trt|nsys|thor|thor-deploy|thor-bench]"
 else
   echo "Done. See $OUT and docs/optimizer/pi05/trt_tvm_profile.md"
 fi
